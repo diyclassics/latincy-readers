@@ -150,3 +150,13 @@ cython_debug/
 
 # Local
 .python-version
+
+# Claude Code
+.claude/
+
+# Ruff
+.ruff_cache/
+
+# CLI output files (keep .gitkeep)
+cli/cli_output/*
+!cli/cli_output/.gitkeep

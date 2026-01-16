@@ -1,65 +1,117 @@
-# CLTK Readers
-A corpus-reader extension for CLTK
+# LatinCy Readers
 
-Version 0.6.10; tested on Python 3.11.11, CLTK 14.0; LatinCy 3.8.0
+Corpus readers for Latin texts with [LatinCy](https://github.com/diyclassics/latincy)/spaCy integration.
+
+Version 1.0.0a1; Python 3.10+; LatinCy 3.8.0+
 
 ## Installation
-`pip install -e git+https://github.com/diyclassics/cltk_readers.git#egg=cltk_readers`
 
-## Usage
-```
->>> from cltkreaders.lat import LatinTesseraeCorpusReader
->>> tess = LatinTesseraeCorpusReader()
+```bash
+pip install -e git+https://github.com/diyclassics/latincy-readers.git#egg=latincyreaders
 ```
 
-```
->>> print(tess.fileids())
-['ammianus.rerum_gestarum.part.14.tess', 'ammianus.rerum_gestarum.part.15.tess', 'ammianus.rerum_gestarum.part.16.tess', 'ammianus.rerum_gestarum.part.17.tess', ...]
+## Quick Start
+
+```python
+from latincyreaders import TesseraeReader, AnnotationLevel
+
+# Initialize reader
+reader = TesseraeReader("/path/to/tesserae/corpus")
+
+# Iterate over documents as spaCy Docs
+for doc in reader.docs():
+    print(f"{doc._.fileid}: {len(list(doc.sents))} sentences")
+
+# Search for sentences containing specific forms
+for result in reader.find_sents(forms=["Caesar", "Caesarem"]):
+    print(f"{result['citation']}: {result['sentence']}")
+
+# Get raw text (no NLP processing)
+for text in reader.texts():
+    print(text[:100])
 ```
 
-```
->>> print(next(tess.tokenized_sents('vergil.aeneid.part.1.tess', simple=True)))
-['Arma', 'virumque', 'cano', ',', 'Troiae', 'qui', 'primus', 'ab', 'oris', 'Italiam', ',', 'fato', 'profugus', ',', 'Laviniaque', 'venit', 'litora', ',', 'multum', 'ille', 'et', 'terris', 'iactatus', 'et', 'alto', 'vi', 'superum', 'saevae', 'memorem', 'Iunonis', 'ob', 'iram', ';']
+## Readers
+
+| Reader | Format | Description |
+|--------|--------|-------------|
+| `TesseraeReader` | `.tess` | CLTK Tesserae corpus format |
+| `PlaintextReader` | `.txt` | Plain text files |
+| `LatinLibraryReader` | `.txt` | Latin Library-style plaintext |
+| `TEIReader` | `.xml` | TEI-XML documents |
+| `PerseusReader` | `.xml` | Perseus Digital Library TEI |
+| `CamenaReader` | `.xml` | CAMENA Neo-Latin corpus |
+| `TxtdownReader` | `.txtd` | Txtdown format with citations |
+
+## Core API
+
+All readers provide a consistent interface:
+
+```python
+reader.fileids()              # List available files
+reader.texts(fileids=...)     # Raw text strings (generator)
+reader.docs(fileids=...)      # spaCy Doc objects (generator)
+reader.sents(fileids=...)     # Sentence spans (generator)
+reader.tokens(fileids=...)    # Token objects (generator)
+reader.metadata(fileids=...)  # File metadata (generator)
+reader.describe()             # Corpus statistics
 ```
 
-## Corpora supported (so far!)
+### Search API
+
+```python
+# Fast regex search (no NLP)
+reader.search(pattern=r"\bbell\w+")
+
+# Form-based sentence search
+reader.find_sents(forms=["amor", "amoris"])
+
+# Lemma-based search (requires NLP)
+reader.find_sents(lemmas=["amo", "bellum"])
+```
+
+### Annotation Levels
+
+Control NLP processing overhead:
+
+```python
+from latincyreaders import AnnotationLevel
+
+# No NLP - fastest, returns raw strings
+reader.texts()
+
+# Tokenization only
+reader.docs(annotation_level=AnnotationLevel.TOKENIZE)
+
+# Basic: tokenization + sentence boundaries (default)
+reader.docs(annotation_level=AnnotationLevel.BASIC)
+
+# Full pipeline: POS, lemma, morphology, NER
+reader.docs(annotation_level=AnnotationLevel.FULL)
+```
+
+## Corpora Supported
+
 - [CLTK Tesserae Latin Corpus](https://github.com/cltk/lat_text_tesserae)
 - [CLTK Tesserae Greek Corpus](https://github.com/cltk/grc_text_tesserae)
-- [Perseus Humanist and Renaissance Italian Poetry in Latin (PDILL)](https://www.perseus.tufts.edu/hopper/collection?collection=Perseus:collection:PDILL)
+- [Perseus Digital Library TEI](https://www.perseus.tufts.edu/)
 - [Latin Library](https://www.thelatinlibrary.com/)
-- [Perseus Dependency Treebanks (AGLDT)](https://perseusdl.github.io/treebank_data/)
-- [Universal Dependency treebanks (UD)](https://universaldependencies.org/)
-- [Open Greek & Latin CSEL files](https://github.com/OpenGreekAndLatin/csel-dev)
-- [CAMENA (jovanovic fork)](https://github.com/nevenjovanovic/camena-neolatinlit)
+- [CAMENA Neo-Latin](https://github.com/nevenjovanovic/camena-neolatinlit)
+- [Open Greek & Latin CSEL](https://github.com/OpenGreekAndLatin/csel-dev)
+- Any plaintext or TEI-XML collection
 
-## Change log
-- 0.6.10: Update requirements
-- 0.6.9: Add a plaintext reader for Ancient Greek
-- 0.6.8: Add parameter to `chunks` method to allow for punctuation to be include/not included in chunking
-- 0.6.7: Add no annotations parameter to spacy_docs for LatinTesseraeCorpusReader
-- 0.6.6: Add `root` parameter to LatinTesseraeCorpusReader
-- 0.6.5: Add fileid selector support for pipe (|) delimited metadata
-- 0.6.4: Bump spaCy version
-- 0.6.3: Update fileid selector for Greek corpus readers
-- 0.6.2: Add LatinCy support for LatinPerseusCorpusReader
-- 0.6.1: Miscellaneous fixes to reader, fileid selector
-- 0.6.0: Introduce metadata-based fileid selector
-- 0.5.6: Bump spaCy version
-- 0.5.5: Update CSEL reader; Update spaCy dependency to LatinCy [lg model](https://huggingface.co/diyclassics/la_core_web_lg)
-- 0.5.4: Update spaCy dependency to LatinCy [md model](https://huggingface.co/diyclassics/la_core_web_md)
-- 0.5.3: Update spaCy dependency to [md model](https://huggingface.co/diyclassics/la_dep_cltk_md)
-- 0.5.2: Minor fixes
-- 0.5.1: Fix spaCy model installation
-- 0.5.0: Update packaging for PyPI
-- 0.4.6: Add `simple` parameter to Tesserae `tokenized_sents`; add `pos_sents` to Tesserae; update demo notebook
-- 0.4.5: Update spaCy dependency to [la_dep_cltk_sm-0.2.0](https://github.com/diyclassics/la_dep_cltk_sm)
-- 0.4.4: Add support for [Camena](https://github.com/nevenjovanovic/camena-neolatinlit)
-- 0.4.3: Add support for Open Greek & Latin [CSEL files](https://github.com/OpenGreekAndLatin/csel-dev)
-- 0.4.2: Update lxml; also update spaCy dependency (now to main spaCy project, as of v. 3.4.2)
-- 0.4.1: Update spaCy dependency
-- 0.4.0: Add support for Latin Library (and similar plaintext collections)
-- 0.3.0: Add support for Perseus-style TEI/XML files; add Latin spaCy support for lemmatization and POS tagging
-- 0.2.4: Add support for Universal Dependencies files
-- 0.2.3: Add support for Perseus AGLDT Treebanks
+## CLI Tools
 
-*Coded 2022-2024 by [Patrick J. Burns](http://github.com/diyclassics)*
+Search tools in `cli/`:
+
+```bash
+# Wordform search
+python cli/token_search.py --forms Caesar Caesarem --limit 100
+
+# Lemma search
+python cli/lemma_search.py --lemmas bellum pax --fileids "cicero.*"
+```
+
+---
+
+*Developed by [Patrick J. Burns](http://github.com/diyclassics)*

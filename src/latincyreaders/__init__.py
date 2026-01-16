@@ -14,6 +14,8 @@ from latincyreaders.core.base import AnnotationLevel
 from latincyreaders.readers.tesserae import TesseraeReader
 from latincyreaders.readers.plaintext import PlaintextReader, LatinLibraryReader
 from latincyreaders.readers.tei import TEIReader, PerseusReader
+from latincyreaders.readers.camena import CamenaReader
+from latincyreaders.readers.txtdown import TxtdownReader
 
 __version__ = "1.0.0a1"
 __all__ = [
@@ -22,5 +24,7 @@ __all__ = [
     "LatinLibraryReader",
     "TEIReader",
     "PerseusReader",
+    "CamenaReader",
+    "TxtdownReader",
     "AnnotationLevel",
 ]
