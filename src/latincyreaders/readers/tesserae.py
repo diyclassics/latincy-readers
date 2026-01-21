@@ -393,7 +393,7 @@ class TesseraeReader(DownloadableCorpusMixin, BaseCorpusReader):
         self,
         pattern: str | None = None,
         forms: list[str] | None = None,
-        lemma: str | None = None,
+        lemma: str | list[str] | None = None,
         matcher_pattern: list[dict] | None = None,
         fileids: str | list[str] | None = None,
         ignore_case: bool = True,
@@ -406,7 +406,7 @@ class TesseraeReader(DownloadableCorpusMixin, BaseCorpusReader):
         Args:
             pattern: Regex pattern to match.
             forms: List of exact word forms to match.
-            lemma: Lemma to match (requires NLP - slower but handles all forms).
+            lemma: Lemma or list of lemmas to match (requires NLP - slower but handles all forms).
             matcher_pattern: spaCy Matcher pattern for advanced queries.
                 A list of token patterns, e.g. [{"POS": "ADJ"}, {"POS": "NOUN"}].
             fileids: Files to search, or None for all.
@@ -425,8 +425,10 @@ class TesseraeReader(DownloadableCorpusMixin, BaseCorpusReader):
             >>> for hit in reader.find_sents(forms=["Caesar", "Caesaris", "Caesarem"]):
             ...     print(hit['sentence'])
 
-            >>> # Slower but complete: by lemma
+            >>> # Slower but complete: by lemma (single or multiple)
             >>> for hit in reader.find_sents(lemma="Caesar"):
+            ...     print(hit['sentence'])
+            >>> for hit in reader.find_sents(lemma=["bellum", "pax"]):
             ...     print(hit['sentence'])
 
             >>> # spaCy Matcher pattern: ADJ + NOUN combinations
@@ -438,7 +440,9 @@ class TesseraeReader(DownloadableCorpusMixin, BaseCorpusReader):
             yield from self._find_sents_by_matcher(matcher_pattern, fileids, context)
         elif lemma is not None:
             # Lemma search requires NLP
-            yield from self._find_sents_by_lemma(lemma, fileids, context)
+            # Normalize to list
+            lemmas = [lemma] if isinstance(lemma, str) else lemma
+            yield from self._find_sents_by_lemma(lemmas, fileids, context)
         else:
             # Fast path: regex search
             yield from self._find_sents_by_pattern(pattern, forms, fileids, ignore_case, context)
@@ -480,24 +484,28 @@ class TesseraeReader(DownloadableCorpusMixin, BaseCorpusReader):
 
     def _find_sents_by_lemma(
         self,
-        lemma: str,
+        lemmas: list[str],
         fileids: str | list[str] | None,
         context: bool,
     ) -> Iterator[dict]:
-        """Find sentences by lemma (uses NLP)."""
-        target_lemma = lemma.lower()
+        """Find sentences by lemma(s) (uses NLP)."""
+        target_lemmas = {lem.lower() for lem in lemmas}
 
         for doc in self.docs(fileids):
             sents = list(doc.sents)
             for i, sent in enumerate(sents):
-                matches = [t.text for t in sent if t.lemma_.lower() == target_lemma]
+                matches = [t.text for t in sent if t.lemma_.lower() in target_lemmas]
                 if matches:
+                    # Find which lemmas matched
+                    matched_lemmas = [
+                        t.lemma_.lower() for t in sent if t.lemma_.lower() in target_lemmas
+                    ]
                     result = {
                         "fileid": doc._.fileid,
                         "citation": self._get_citation_for_span(doc, sent),
                         "sentence": sent.text,
                         "matches": matches,
-                        "lemma": lemma,
+                        "lemmas": list(set(matched_lemmas)),
                     }
                     if context:
                         result["prev_sent"] = sents[i - 1].text if i > 0 else None

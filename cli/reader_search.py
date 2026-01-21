@@ -1,10 +1,15 @@
 #!/usr/bin/env python
-"""CLI for wordform-based sentence search in Tesserae corpora.
+"""CLI for sentence search in Tesserae corpora.
+
+Supports multiple search modes:
+- Lemma search: Slower but catches all inflected forms
+- Form search: Fast exact word matching
+- Pattern search: Fast regex matching
 
 Example usage:
-    python wordform_search.py --forms Thebas Thebarum --limit 100
-    python wordform_search.py --forms Caesar --root /path/to/corpus
-    python wordform_search.py --pattern "\\bTheb\\w+" --no-save
+    python reader_search.py --lemmas Caesar --limit 100
+    python reader_search.py --forms Thebas Thebarum --limit 100
+    python reader_search.py --pattern "\\bTheb\\w+" --no-save
 """
 from __future__ import annotations
 
@@ -12,12 +17,13 @@ import argparse
 import sys
 import time
 from datetime import datetime
+from itertools import islice
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from tqdm import tqdm
 
-from latincyreaders import TesseraeReader
+from latincyreaders import TesseraeReader, LatinLibraryReader, CamenaReader
 
 # Output directory relative to this script
 CLI_OUTPUT_DIR = Path(__file__).parent / "cli_output"
@@ -29,34 +35,52 @@ if TYPE_CHECKING:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="Search for sentences containing specific word forms.",
+        description="Search for sentences in Tesserae corpora.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  %(prog)s --forms Thebas Thebarum
-  %(prog)s --forms Caesar Caesaris --limit 50 --output caesar.tsv
-  %(prog)s --pattern "\\bTheb\\w+" --ignore-case
+  # Lemma search (slower, catches all forms)
+  %(prog)s --lemmas Caesar
+  %(prog)s --lemmas bellum pax --fileids "cicero.*"
+
+  # Form search (fast, exact match)
+  %(prog)s --forms Thebas Thebarum --limit 50
+  %(prog)s --forms Caesar Caesaris --output caesar.tsv
+
+  # Pattern search (fast, regex)
+  %(prog)s --pattern "\\bTheb\\w+"
         """,
     )
 
     # Search parameters (mutually exclusive group)
     search_group = parser.add_mutually_exclusive_group(required=True)
     search_group.add_argument(
+        "--lemmas", "-l",
+        nargs="+",
+        help="Lemma(s) to search for (slower, but finds all inflected forms)",
+    )
+    search_group.add_argument(
         "--forms", "-f",
         nargs="+",
-        help="Word form(s) to search for",
+        help="Exact word form(s) to search for (fast)",
     )
     search_group.add_argument(
         "--pattern", "-p",
-        help="Regex pattern to search for",
+        help="Regex pattern to search for (fast)",
     )
 
     # Corpus parameters
     parser.add_argument(
+        "--reader",
+        choices=["tesserae", "latinlibrary", "camena"],
+        default="tesserae",
+        help="Corpus reader to use (default: tesserae)",
+    )
+    parser.add_argument(
         "--root", "-r",
         type=Path,
         default=None,
-        help="Root directory of Tesserae corpus (default: auto-detect or download)",
+        help="Root directory of corpus (default: auto-detect or download)",
     )
     parser.add_argument(
         "--fileids",
@@ -156,16 +180,27 @@ def write_results(
 def main(argv: list[str] | None = None) -> int:
     """Main entry point."""
     args = parse_args(argv)
-
     start_time = time.time()
 
-    # Validate root directory
-    if not args.root.exists():
-        print(f"Error: Corpus directory not found: {args.root}", file=sys.stderr)
-        return 1
-
     # Initialize reader
-    reader = TesseraeReader(args.root)
+    if not args.quiet:
+        print(f"Initializing {args.reader} reader...", file=sys.stderr)
+
+    reader_classes = {
+        "tesserae": TesseraeReader,
+        "latinlibrary": LatinLibraryReader,
+        "camena": CamenaReader,
+    }
+
+    # Warn about limited support for non-Tesserae readers
+    if args.reader != "tesserae":
+        print(
+            f"Warning: find_sents() is optimized for Tesserae format. "
+            f"Results with {args.reader} reader may vary.",
+            file=sys.stderr,
+        )
+
+    reader = reader_classes[args.reader](args.root)
 
     # Get fileids if filter specified
     fileids = None
@@ -178,15 +213,43 @@ def main(argv: list[str] | None = None) -> int:
         if not fileids:
             print("Warning: No files match the specified filters", file=sys.stderr)
 
-    # Run search
-    results_iter = reader.find_sents(
-        pattern=args.pattern,
-        forms=args.forms,
-        fileids=fileids,
-        ignore_case=not args.case_sensitive,
-        context=args.context,
-        limit=args.limit,
-    )
+    # Determine search mode and run
+    if args.lemmas:
+        if not args.quiet:
+            print(f"Searching for lemmas: {', '.join(args.lemmas)}", file=sys.stderr)
+        results_iter = reader.find_sents(
+            lemma=args.lemmas,
+            fileids=fileids,
+            context=args.context,
+        )
+        search_type = "lemma"
+        first_term = args.lemmas[0]
+    elif args.forms:
+        if not args.quiet:
+            print(f"Searching for forms: {', '.join(args.forms)}", file=sys.stderr)
+        results_iter = reader.find_sents(
+            forms=args.forms,
+            fileids=fileids,
+            ignore_case=not args.case_sensitive,
+            context=args.context,
+        )
+        search_type = "form"
+        first_term = args.forms[0]
+    else:
+        if not args.quiet:
+            print(f"Searching for pattern: {args.pattern}", file=sys.stderr)
+        results_iter = reader.find_sents(
+            pattern=args.pattern,
+            fileids=fileids,
+            ignore_case=not args.case_sensitive,
+            context=args.context,
+        )
+        search_type = "pattern"
+        first_term = "pattern"
+
+    # Apply limit if specified
+    if args.limit is not None:
+        results_iter = islice(results_iter, args.limit)
 
     # Collect results with progress
     results: list[dict] = []
@@ -199,18 +262,14 @@ def main(argv: list[str] | None = None) -> int:
 
     # Determine output destination
     if args.no_save:
-        # Output to stdout
         write_results(results, sys.stdout, args.format)
     else:
-        # Determine output path
         if args.output:
             output_path = args.output
         else:
-            # Generate timestamped filename
             timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-            first_term = args.forms[0] if args.forms else "pattern"
             ext = "jsonl" if args.format == "jsonl" else args.format
-            filename = f"{timestamp}-{first_term.lower()}-wordform-search.{ext}"
+            filename = f"{timestamp}-{first_term.lower()}-{search_type}-search.{ext}"
             CLI_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
             output_path = CLI_OUTPUT_DIR / filename
 

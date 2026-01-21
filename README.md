@@ -242,14 +242,18 @@ if not result.is_valid:
 
 ## CLI Tools
 
-Search tools in `cli/`:
+Search tool in `cli/`:
 
 ```bash
-# Wordform search
-python cli/token_search.py --forms Caesar Caesarem --limit 100
+# Lemma search (slower, finds all inflected forms)
+python cli/reader_search.py --lemmas Caesar --limit 100
+python cli/reader_search.py --lemmas bellum pax --fileids "cicero.*"
 
-# Lemma search
-python cli/lemma_search.py --lemmas bellum pax --fileids "cicero.*"
+# Form search (fast, exact match)
+python cli/reader_search.py --forms Caesar Caesarem --limit 100
+
+# Pattern search (fast, regex)
+python cli/reader_search.py --pattern "\\bTheb\\w+" --output thebes.tsv
 ```
 
 ---
