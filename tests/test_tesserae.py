@@ -639,6 +639,29 @@ class TestNgrams:
                 assert hasattr(token, 'lemma_')
                 assert hasattr(token, 'pos_')
 
+    def test_ngrams_basis_text(self, reader):
+        """ngrams(basis='text') returns surface forms (default)."""
+        bigrams = list(reader.ngrams(n=2, basis="text"))
+        assert len(bigrams) > 0
+        # Should be strings
+        assert all(isinstance(bg, str) for bg in bigrams)
+
+    def test_ngrams_basis_lemma(self, reader):
+        """ngrams(basis='lemma') returns lemmatized forms."""
+        text_bigrams = list(reader.ngrams(n=2, basis="text"))
+        lemma_bigrams = list(reader.ngrams(n=2, basis="lemma"))
+        assert len(lemma_bigrams) > 0
+        # Same count but potentially different content
+        assert len(text_bigrams) == len(lemma_bigrams)
+        # At least some should differ (lemmas vs surface forms)
+        assert text_bigrams != lemma_bigrams or len(text_bigrams) == 0
+
+    def test_ngrams_basis_norm(self, reader):
+        """ngrams(basis='norm') returns normalized forms."""
+        norm_bigrams = list(reader.ngrams(n=2, basis="norm"))
+        assert len(norm_bigrams) > 0
+        assert all(isinstance(bg, str) for bg in norm_bigrams)
+
 
 class TestSkipgrams:
     """Test skipgrams() method."""
@@ -687,3 +710,16 @@ class TestSkipgrams:
             words = sg.split()
             for word in words:
                 assert not all(c in string.punctuation for c in word)
+
+    def test_skipgrams_basis_text(self, reader):
+        """skipgrams(basis='text') returns surface forms (default)."""
+        skipgrams = list(reader.skipgrams(n=2, k=1, basis="text"))
+        assert len(skipgrams) > 0
+        assert all(isinstance(sg, str) for sg in skipgrams)
+
+    def test_skipgrams_basis_lemma(self, reader):
+        """skipgrams(basis='lemma') returns lemmatized forms."""
+        text_skipgrams = list(reader.skipgrams(n=2, k=1, basis="text"))
+        lemma_skipgrams = list(reader.skipgrams(n=2, k=1, basis="lemma"))
+        assert len(lemma_skipgrams) > 0
+        assert len(text_skipgrams) == len(lemma_skipgrams)

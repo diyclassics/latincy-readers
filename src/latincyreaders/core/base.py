@@ -479,6 +479,7 @@ class BaseCorpusReader(ABC):
         filter_stops: bool = False,
         filter_punct: bool = True,
         filter_nums: bool = False,
+        basis: str = "text",
         as_tuples: bool = False,
     ) -> Iterator[str | tuple["Token", ...]]:
         """Extract n-grams from the corpus.
@@ -492,7 +493,12 @@ class BaseCorpusReader(ABC):
             filter_stops: If True, exclude n-grams containing stop words.
             filter_punct: If True, exclude n-grams containing punctuation.
             filter_nums: If True, exclude n-grams containing numbers.
+            basis: How to represent tokens in output strings:
+                - "text": surface form (default) - "amat te"
+                - "lemma": lemmatized form - "amo tu"
+                - "norm": normalized form (spaCy's norm_)
             as_tuples: If True, yield tuples of Token objects instead of strings.
+                When True, basis is ignored.
 
         Yields:
             N-gram strings like "arma virumque" (default), or tuples of
@@ -503,6 +509,11 @@ class BaseCorpusReader(ABC):
             >>> bigrams = list(reader.ngrams(n=2, fileids="catullus.*"))
             >>> print(bigrams[:5])
             ['Cui dono', 'dono lepidum', 'lepidum novum', ...]
+
+            >>> # Get bigrams by lemma for better frequency analysis
+            >>> lemma_bigrams = list(reader.ngrams(n=2, basis="lemma"))
+            >>> print(lemma_bigrams[:5])
+            ['qui do', 'do lepidus', 'lepidus novus', ...]
 
             >>> # Get trigrams as token tuples for linguistic analysis
             >>> for gram in reader.ngrams(n=3, as_tuples=True, fileids="catullus.*"):
@@ -523,7 +534,12 @@ class BaseCorpusReader(ABC):
                 if as_tuples:
                     yield tuple(token for token in span)
                 else:
-                    yield span.text
+                    if basis == "lemma":
+                        yield " ".join(t.lemma_ for t in span)
+                    elif basis == "norm":
+                        yield " ".join(t.norm_ for t in span)
+                    else:  # "text" or fallback
+                        yield span.text
 
     def skipgrams(
         self,
@@ -533,6 +549,7 @@ class BaseCorpusReader(ABC):
         filter_stops: bool = False,
         filter_punct: bool = True,
         filter_nums: bool = False,
+        basis: str = "text",
         as_tuples: bool = False,
     ) -> Iterator[str | tuple["Token", ...]]:
         """Extract skipgrams from the corpus.
@@ -548,7 +565,12 @@ class BaseCorpusReader(ABC):
             filter_stops: If True, exclude skipgrams containing stop words.
             filter_punct: If True, exclude skipgrams containing punctuation.
             filter_nums: If True, exclude skipgrams containing numbers.
+            basis: How to represent tokens in output strings:
+                - "text": surface form (default)
+                - "lemma": lemmatized form
+                - "norm": normalized form (spaCy's norm_)
             as_tuples: If True, yield tuples of Token objects instead of strings.
+                When True, basis is ignored.
 
         Yields:
             Skipgram strings (default), or tuples of Token objects if as_tuples=True.
@@ -557,21 +579,13 @@ class BaseCorpusReader(ABC):
             >>> # Bigrams with 1 skip - captures non-adjacent word pairs
             >>> for sg in reader.skipgrams(n=2, k=1, fileids="catullus.*"):
             ...     print(sg)
+
+            >>> # Skipgrams by lemma
+            >>> for sg in reader.skipgrams(n=2, k=1, basis="lemma"):
+            ...     print(sg)
         """
-        import textacy.extract
-
         for doc in self.docs(fileids):
-            # textacy returns tuples of tokens for skipgrams
-            skipgram_tuples = textacy.extract.basics.ngrams(
-                doc,
-                n=n,
-                filter_stops=filter_stops,
-                filter_punct=filter_punct,
-                filter_nums=filter_nums,
-            )
-
-            # For skipgrams, we need to use a different approach
-            # textacy doesn't have a direct skipgram function, so we implement it
+            # Filter tokens first
             tokens = [t for t in doc if self._token_passes_filters(
                 t, filter_stops, filter_punct, filter_nums
             )]
@@ -592,7 +606,12 @@ class BaseCorpusReader(ABC):
                         if as_tuples:
                             yield gram_tokens
                         else:
-                            yield " ".join(t.text for t in gram_tokens)
+                            if basis == "lemma":
+                                yield " ".join(t.lemma_ for t in gram_tokens)
+                            elif basis == "norm":
+                                yield " ".join(t.norm_ for t in gram_tokens)
+                            else:  # "text" or fallback
+                                yield " ".join(t.text for t in gram_tokens)
 
     def _token_passes_filters(
         self,
