@@ -471,3 +471,141 @@ class BaseCorpusReader(ABC):
                     count += 1
                     if limit is not None and count >= limit:
                         return
+
+    def ngrams(
+        self,
+        n: int = 2,
+        fileids: str | list[str] | None = None,
+        filter_stops: bool = False,
+        filter_punct: bool = True,
+        filter_nums: bool = False,
+        as_tuples: bool = False,
+    ) -> Iterator[str | tuple["Token", ...]]:
+        """Extract n-grams from the corpus.
+
+        N-grams are contiguous sequences of n tokens. Useful for
+        collocations, frequency analysis, and language modeling.
+
+        Args:
+            n: Size of n-grams (2 for bigrams, 3 for trigrams, etc.).
+            fileids: Files to process, or None for all.
+            filter_stops: If True, exclude n-grams containing stop words.
+            filter_punct: If True, exclude n-grams containing punctuation.
+            filter_nums: If True, exclude n-grams containing numbers.
+            as_tuples: If True, yield tuples of Token objects instead of strings.
+
+        Yields:
+            N-gram strings like "arma virumque" (default), or tuples of
+            Token objects if as_tuples=True.
+
+        Example:
+            >>> # Get all bigrams from Catullus
+            >>> bigrams = list(reader.ngrams(n=2, fileids="catullus.*"))
+            >>> print(bigrams[:5])
+            ['Cui dono', 'dono lepidum', 'lepidum novum', ...]
+
+            >>> # Get trigrams as token tuples for linguistic analysis
+            >>> for gram in reader.ngrams(n=3, as_tuples=True, fileids="catullus.*"):
+            ...     print([(t.text, t.pos_) for t in gram])
+        """
+        import textacy.extract
+
+        for doc in self.docs(fileids):
+            ngram_spans = textacy.extract.ngrams(
+                doc,
+                n=n,
+                filter_stops=filter_stops,
+                filter_punct=filter_punct,
+                filter_nums=filter_nums,
+            )
+
+            for span in ngram_spans:
+                if as_tuples:
+                    yield tuple(token for token in span)
+                else:
+                    yield span.text
+
+    def skipgrams(
+        self,
+        n: int = 2,
+        k: int = 1,
+        fileids: str | list[str] | None = None,
+        filter_stops: bool = False,
+        filter_punct: bool = True,
+        filter_nums: bool = False,
+        as_tuples: bool = False,
+    ) -> Iterator[str | tuple["Token", ...]]:
+        """Extract skipgrams from the corpus.
+
+        Skipgrams are like n-grams but allow gaps between tokens.
+        For example, a (2,1)-skipgram from "the quick brown fox" includes
+        both "the quick" and "the brown" (skipping "quick").
+
+        Args:
+            n: Number of tokens in each skipgram.
+            k: Maximum number of tokens to skip between included tokens.
+            fileids: Files to process, or None for all.
+            filter_stops: If True, exclude skipgrams containing stop words.
+            filter_punct: If True, exclude skipgrams containing punctuation.
+            filter_nums: If True, exclude skipgrams containing numbers.
+            as_tuples: If True, yield tuples of Token objects instead of strings.
+
+        Yields:
+            Skipgram strings (default), or tuples of Token objects if as_tuples=True.
+
+        Example:
+            >>> # Bigrams with 1 skip - captures non-adjacent word pairs
+            >>> for sg in reader.skipgrams(n=2, k=1, fileids="catullus.*"):
+            ...     print(sg)
+        """
+        import textacy.extract
+
+        for doc in self.docs(fileids):
+            # textacy returns tuples of tokens for skipgrams
+            skipgram_tuples = textacy.extract.basics.ngrams(
+                doc,
+                n=n,
+                filter_stops=filter_stops,
+                filter_punct=filter_punct,
+                filter_nums=filter_nums,
+            )
+
+            # For skipgrams, we need to use a different approach
+            # textacy doesn't have a direct skipgram function, so we implement it
+            tokens = [t for t in doc if self._token_passes_filters(
+                t, filter_stops, filter_punct, filter_nums
+            )]
+
+            for i in range(len(tokens)):
+                for skip in range(k + 1):
+                    # Build skipgram indices
+                    indices = []
+                    pos = i
+                    for _ in range(n):
+                        if pos >= len(tokens):
+                            break
+                        indices.append(pos)
+                        pos += skip + 1
+
+                    if len(indices) == n:
+                        gram_tokens = tuple(tokens[idx] for idx in indices)
+                        if as_tuples:
+                            yield gram_tokens
+                        else:
+                            yield " ".join(t.text for t in gram_tokens)
+
+    def _token_passes_filters(
+        self,
+        token: "Token",
+        filter_stops: bool,
+        filter_punct: bool,
+        filter_nums: bool,
+    ) -> bool:
+        """Check if a token passes the specified filters."""
+        if filter_stops and token.is_stop:
+            return False
+        if filter_punct and token.is_punct:
+            return False
+        if filter_nums and token.like_num:
+            return False
+        return True

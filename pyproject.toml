@@ -28,6 +28,7 @@ dependencies = [
     "spacy>=3.7",
     "lxml>=5.0",
     "natsort>=8.0",
+    "textacy>=0.13",
 ]
 
 [project.optional-dependencies]

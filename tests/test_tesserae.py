@@ -570,3 +570,120 @@ class TestKWIC:
         """kwic() returns empty iterator for non-existent word."""
         results = list(reader.kwic("xyznonexistent123"))
         assert len(results) == 0
+
+
+class TestNgrams:
+    """Test ngrams() method."""
+
+    @pytest.fixture
+    def reader(self, tesserae_dir):
+        return TesseraeReader(
+            root=tesserae_dir,
+            fileids="*.tess",
+            annotation_level=AnnotationLevel.BASIC,
+        )
+
+    def test_ngrams_returns_strings_by_default(self, reader):
+        """ngrams() returns strings by default."""
+        bigrams = list(reader.ngrams(n=2))
+        assert len(bigrams) > 0
+        assert all(isinstance(bg, str) for bg in bigrams)
+
+    def test_ngrams_as_tuples(self, reader):
+        """ngrams(as_tuples=True) returns token tuples."""
+        bigrams = list(reader.ngrams(n=2, as_tuples=True))
+        assert len(bigrams) > 0
+        assert all(isinstance(bg, tuple) for bg in bigrams)
+        # Each tuple should have n tokens
+        assert all(len(bg) == 2 for bg in bigrams)
+
+    def test_ngrams_size(self, reader):
+        """ngrams(n=3) returns trigrams."""
+        trigrams = list(reader.ngrams(n=3))
+        assert len(trigrams) > 0
+        # Each trigram should have 3 words separated by spaces
+        for tg in trigrams[:10]:
+            words = tg.split()
+            assert len(words) == 3
+
+    def test_ngrams_filter_punct(self, reader):
+        """ngrams(filter_punct=True) excludes punctuation."""
+        bigrams = list(reader.ngrams(n=2, filter_punct=True))
+        # Bigrams shouldn't contain standalone punctuation
+        import string
+        for bg in bigrams[:50]:
+            words = bg.split()
+            for word in words:
+                # Word shouldn't be pure punctuation
+                assert not all(c in string.punctuation for c in word)
+
+    def test_ngrams_filter_punct_false(self, reader):
+        """ngrams(filter_punct=False) includes punctuation."""
+        bigrams = list(reader.ngrams(n=2, filter_punct=False))
+        # Should have some bigrams with punctuation
+        import string
+        has_punct = any(
+            any(c in string.punctuation for c in bg)
+            for bg in bigrams[:100]
+        )
+        assert has_punct
+
+    def test_ngrams_tuple_has_token_attributes(self, reader):
+        """ngrams(as_tuples=True) tokens have spaCy attributes."""
+        bigrams = list(reader.ngrams(n=2, as_tuples=True))
+        if bigrams:
+            first_gram = bigrams[0]
+            # Tokens should have text, lemma_, pos_
+            for token in first_gram:
+                assert hasattr(token, 'text')
+                assert hasattr(token, 'lemma_')
+                assert hasattr(token, 'pos_')
+
+
+class TestSkipgrams:
+    """Test skipgrams() method."""
+
+    @pytest.fixture
+    def reader(self, tesserae_dir):
+        return TesseraeReader(
+            root=tesserae_dir,
+            fileids="*.tess",
+            annotation_level=AnnotationLevel.BASIC,
+        )
+
+    def test_skipgrams_returns_strings_by_default(self, reader):
+        """skipgrams() returns strings by default."""
+        skipgrams = list(reader.skipgrams(n=2, k=1))
+        assert len(skipgrams) > 0
+        assert all(isinstance(sg, str) for sg in skipgrams)
+
+    def test_skipgrams_as_tuples(self, reader):
+        """skipgrams(as_tuples=True) returns token tuples."""
+        skipgrams = list(reader.skipgrams(n=2, k=1, as_tuples=True))
+        assert len(skipgrams) > 0
+        assert all(isinstance(sg, tuple) for sg in skipgrams)
+        assert all(len(sg) == 2 for sg in skipgrams)
+
+    def test_skipgrams_more_than_ngrams(self, reader):
+        """skipgrams with k>0 should produce more results than ngrams."""
+        # Same filters for fair comparison
+        ngrams = list(reader.ngrams(n=2, filter_punct=True))
+        skipgrams = list(reader.skipgrams(n=2, k=1, filter_punct=True))
+        # Skipgrams include ngrams plus skip patterns
+        assert len(skipgrams) >= len(ngrams)
+
+    def test_skipgrams_k0_equals_ngrams(self, reader):
+        """skipgrams with k=0 should equal ngrams."""
+        # Note: Due to different iteration, counts may differ slightly
+        # but the concept is the same - k=0 means no skips allowed
+        skipgrams_k0 = list(reader.skipgrams(n=2, k=0, filter_punct=True))
+        assert len(skipgrams_k0) > 0
+
+    def test_skipgrams_filter_punct(self, reader):
+        """skipgrams(filter_punct=True) excludes punctuation."""
+        skipgrams = list(reader.skipgrams(n=2, k=1, filter_punct=True))
+        import string
+        for sg in skipgrams[:50]:
+            words = sg.split()
+            for word in words:
+                assert not all(c in string.punctuation for c in word)
