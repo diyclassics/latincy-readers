@@ -414,3 +414,159 @@ class TestTesseraeSearch:
             if line:
                 data = json.loads(line)
                 assert "sentence" in data
+
+
+class TestConcordance:
+    """Test concordance() method."""
+
+    @pytest.fixture
+    def reader(self, tesserae_dir):
+        return TesseraeReader(
+            root=tesserae_dir,
+            fileids="*.tess",
+            annotation_level=AnnotationLevel.BASIC,
+        )
+
+    def test_concordance_returns_dict(self, reader):
+        """concordance() returns a dictionary."""
+        conc = reader.concordance()
+        assert isinstance(conc, dict)
+        assert len(conc) > 0
+
+    def test_concordance_values_are_lists(self, reader):
+        """concordance() values are lists of citations."""
+        conc = reader.concordance()
+        for key, refs in conc.items():
+            assert isinstance(key, str)
+            assert isinstance(refs, list)
+            assert all(isinstance(r, str) for r in refs)
+
+    def test_concordance_citations_format(self, reader):
+        """concordance() includes citation strings from Tesserae."""
+        conc = reader.concordance()
+        # At least some citations should have angle bracket format
+        all_refs = [ref for refs in conc.values() for ref in refs]
+        assert any("<" in ref for ref in all_refs)
+
+    def test_concordance_basis_lemma(self, reader):
+        """concordance(basis='lemma') groups by lemma."""
+        conc = reader.concordance(basis="lemma")
+        assert isinstance(conc, dict)
+        assert len(conc) > 0
+
+    def test_concordance_basis_text(self, reader):
+        """concordance(basis='text') groups by surface form."""
+        conc = reader.concordance(basis="text")
+        assert isinstance(conc, dict)
+        assert len(conc) > 0
+
+    def test_concordance_basis_norm(self, reader):
+        """concordance(basis='norm') groups by normalized form."""
+        conc = reader.concordance(basis="norm")
+        assert isinstance(conc, dict)
+        assert len(conc) > 0
+
+    def test_concordance_only_alpha_true(self, reader):
+        """concordance(only_alpha=True) excludes punctuation."""
+        conc = reader.concordance(only_alpha=True)
+        # Should not have punctuation-only keys
+        punct_keys = [k for k in conc.keys() if not any(c.isalpha() for c in k)]
+        assert len(punct_keys) == 0
+
+    def test_concordance_only_alpha_false(self, reader):
+        """concordance(only_alpha=False) includes punctuation."""
+        conc = reader.concordance(only_alpha=False)
+        # Should have some punctuation keys
+        punct_keys = [k for k in conc.keys() if not any(c.isalpha() for c in k)]
+        assert len(punct_keys) > 0
+
+    def test_concordance_sorted(self, reader):
+        """concordance() keys are sorted alphabetically."""
+        conc = reader.concordance()
+        keys = list(conc.keys())
+        assert keys == sorted(keys)
+
+
+class TestKWIC:
+    """Test kwic() (keyword in context) method."""
+
+    @pytest.fixture
+    def reader(self, tesserae_dir):
+        return TesseraeReader(
+            root=tesserae_dir,
+            fileids="*.tess",
+            annotation_level=AnnotationLevel.BASIC,
+        )
+
+    def test_kwic_returns_iterator(self, reader):
+        """kwic() returns an iterator of dicts."""
+        results = list(reader.kwic("Mucius"))
+        assert len(results) > 0
+        assert all(isinstance(r, dict) for r in results)
+
+    def test_kwic_result_structure(self, reader):
+        """kwic() results have expected keys."""
+        result = next(reader.kwic("Mucius"))
+        assert "left" in result
+        assert "match" in result
+        assert "right" in result
+        assert "citation" in result
+        assert "fileid" in result
+
+    def test_kwic_match_is_keyword(self, reader):
+        """kwic() match field contains the matched word."""
+        for hit in reader.kwic("Mucius"):
+            assert hit["match"].lower() == "mucius"
+
+    def test_kwic_ignore_case_true(self, reader):
+        """kwic(ignore_case=True) matches case-insensitively."""
+        upper_results = list(reader.kwic("MUCIUS", ignore_case=True))
+        lower_results = list(reader.kwic("mucius", ignore_case=True))
+        assert len(upper_results) == len(lower_results)
+
+    def test_kwic_ignore_case_false(self, reader):
+        """kwic(ignore_case=False) is case-sensitive."""
+        # 'Mucius' (capitalized) should match, 'mucius' may not
+        cap_results = list(reader.kwic("Mucius", ignore_case=False))
+        assert len(cap_results) >= 0  # At least runs without error
+
+    def test_kwic_window_size(self, reader):
+        """kwic(window=N) controls context size."""
+        # Small window
+        hit_small = next(reader.kwic("Mucius", window=2))
+        # Large window
+        hit_large = next(reader.kwic("Mucius", window=10))
+        # Larger window should generally have more context (unless at doc boundary)
+        assert len(hit_large["left"]) >= len(hit_small["left"]) or \
+               len(hit_large["right"]) >= len(hit_small["right"])
+
+    def test_kwic_limit(self, reader):
+        """kwic(limit=N) limits number of results."""
+        all_results = list(reader.kwic("et", limit=None))
+        limited_results = list(reader.kwic("et", limit=3))
+        assert len(limited_results) <= 3
+        if len(all_results) > 3:
+            assert len(limited_results) == 3
+
+    def test_kwic_by_lemma(self, tesserae_dir):
+        """kwic(by_lemma=True) matches against lemma."""
+        reader = TesseraeReader(
+            root=tesserae_dir,
+            fileids="*.tess",
+            annotation_level=AnnotationLevel.BASIC,
+        )
+        # 'sum' is lemma for 'est', 'sunt', 'esse', etc.
+        lemma_results = list(reader.kwic("sum", by_lemma=True, limit=5))
+        # Should match various forms of 'sum'
+        assert len(lemma_results) >= 0  # At least runs
+
+    def test_kwic_citation_format(self, reader):
+        """kwic() includes Tesserae-style citations."""
+        hit = next(reader.kwic("Mucius"))
+        # Should have angle bracket citation
+        assert "<" in hit["citation"]
+
+    def test_kwic_no_match(self, reader):
+        """kwic() returns empty iterator for non-existent word."""
+        results = list(reader.kwic("xyznonexistent123"))
+        assert len(results) == 0

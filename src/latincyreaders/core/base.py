@@ -313,3 +313,161 @@ class BaseCorpusReader(ABC):
         for doc in self.docs(fileids):
             for token in doc:
                 yield token.text if as_text else token
+
+    # -------------------------------------------------------------------------
+    # Text analysis methods
+    # -------------------------------------------------------------------------
+
+    def _get_token_citation(self, doc: "Doc", token: "Token", token_idx: int) -> str:
+        """Get citation for a token, checking spans if not on token directly.
+
+        Args:
+            doc: The document containing the token.
+            token: The token to get citation for.
+            token_idx: Index of the token in the document.
+
+        Returns:
+            Citation string, or fileid:idx fallback.
+        """
+        # First check token-level citation
+        citation = getattr(token._, "citation", None)
+        if citation is not None:
+            return citation
+
+        # Check if token is within a span that has a citation (e.g., Tesserae lines)
+        for span_key in doc.spans:
+            for span in doc.spans[span_key]:
+                if span.start <= token.i < span.end:
+                    span_citation = getattr(span._, "citation", None)
+                    if span_citation is not None:
+                        return span_citation
+
+        # Fallback to fileid:index
+        fileid = doc._.fileid or "unknown"
+        return f"{fileid}:{token_idx}"
+
+    def concordance(
+        self,
+        fileids: str | list[str] | None = None,
+        basis: str = "lemma",
+        only_alpha: bool = True,
+    ) -> dict[str, list[str]]:
+        """Build a concordance mapping words to their citation locations.
+
+        A concordance is a dictionary where keys are word forms and values
+        are lists of citations/locations where that word appears.
+
+        Args:
+            fileids: Files to process, or None for all.
+            basis: How to key the concordance:
+                - "lemma": group by lemma (default, recommended)
+                - "norm": group by normalized form (spaCy's norm_)
+                - "text": group by exact surface form
+            only_alpha: If True, skip non-alphabetic tokens (punctuation, numbers).
+
+        Returns:
+            Dict mapping word form -> list of citation strings.
+            Citations are in format "<citation>" if available, else "fileid:token_idx".
+
+        Example:
+            >>> conc = reader.concordance(basis="lemma")
+            >>> conc["amor"]
+            ['<catull. 1.1>', '<catull. 1.3>', '<verg. aen. 4.1>']
+        """
+        from collections import defaultdict
+
+        concordance_dict: defaultdict[str, list[str]] = defaultdict(list)
+
+        for doc in self.docs(fileids):
+            for i, token in enumerate(doc):
+                # Skip non-alphabetic tokens if requested
+                if only_alpha and not token.is_alpha:
+                    continue
+
+                # Determine the key based on basis
+                if basis == "lemma":
+                    key = token.lemma_
+                elif basis == "norm":
+                    key = token.norm_
+                else:  # "text" or fallback
+                    key = token.text
+
+                citation = self._get_token_citation(doc, token, i)
+                concordance_dict[key].append(citation)
+
+        # Sort by key and return as regular dict
+        return dict(sorted(concordance_dict.items()))
+
+    def kwic(
+        self,
+        keyword: str,
+        fileids: str | list[str] | None = None,
+        window: int = 5,
+        ignore_case: bool = True,
+        by_lemma: bool = False,
+        limit: int | None = None,
+    ) -> Iterator[dict[str, str]]:
+        """Find keyword in context (KWIC) across the corpus.
+
+        Returns matches with surrounding context, useful for studying
+        word usage patterns.
+
+        Args:
+            keyword: Word to search for.
+            fileids: Files to search, or None for all.
+            window: Number of tokens on each side for context.
+            ignore_case: If True, match case-insensitively.
+            by_lemma: If True, match against lemma instead of surface form.
+            limit: Maximum number of results to return.
+
+        Yields:
+            Dicts with keys:
+                - left: left context (string)
+                - match: matched token (string)
+                - right: right context (string)
+                - citation: citation string if available
+                - fileid: file identifier
+
+        Example:
+            >>> for hit in reader.kwic("amor", window=3, by_lemma=True):
+            ...     print(f"{hit['left']} [{hit['match']}] {hit['right']}")
+            ...     print(f"  -- {hit['citation']}")
+        """
+        target = keyword.lower() if ignore_case else keyword
+        count = 0
+
+        for doc in self.docs(fileids):
+            fileid = doc._.fileid or "unknown"
+            tokens = list(doc)
+
+            for i, token in enumerate(tokens):
+                # Determine what to match against
+                if by_lemma:
+                    token_value = token.lemma_.lower() if ignore_case else token.lemma_
+                else:
+                    token_value = token.text.lower() if ignore_case else token.text
+
+                if token_value == target:
+                    # Build context windows
+                    left_start = max(0, i - window)
+                    right_end = min(len(tokens), i + window + 1)
+
+                    left_tokens = tokens[left_start:i]
+                    right_tokens = tokens[i + 1:right_end]
+
+                    left_text = " ".join(t.text for t in left_tokens)
+                    right_text = " ".join(t.text for t in right_tokens)
+
+                    citation = self._get_token_citation(doc, token, i)
+
+                    yield {
+                        "left": left_text,
+                        "match": token.text,
+                        "right": right_text,
+                        "citation": citation,
+                        "fileid": fileid,
+                    }
+
+                    count += 1
+                    if limit is not None and count >= limit:
+                        return
