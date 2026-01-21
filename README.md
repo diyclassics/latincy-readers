@@ -234,12 +234,10 @@ if not result.is_valid:
 
 ## Corpora Supported
 
-- [CLTK Tesserae Latin Corpus](https://github.com/cltk/lat_text_tesserae)
-- [CLTK Tesserae Greek Corpus](https://github.com/cltk/grc_text_tesserae)
+- [Tesserae Latin Corpus](https://github.com/cltk/lat_text_tesserae)
 - [Perseus Digital Library TEI](https://www.perseus.tufts.edu/)
 - [Latin Library](https://github.com/cltk/lat_text_latin_library)
 - [CAMENA Neo-Latin](https://github.com/nevenjovanovic/camena-neolatinlit)
-- [Open Greek & Latin CSEL](https://github.com/OpenGreekAndLatin/csel-dev)
 - Any plaintext or TEI-XML collection
 
 ## CLI Tools

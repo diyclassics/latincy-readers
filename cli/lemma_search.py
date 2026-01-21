@@ -9,6 +9,7 @@ Example usage:
     python lemma_search.py --lemmas Caesar Pompeius
     python lemma_search.py --lemmas amor --no-save
 """
+
 from __future__ import annotations
 
 import argparse
@@ -44,7 +45,8 @@ Examples:
 
     # Search parameters
     parser.add_argument(
-        "--lemmas", "-l",
+        "--lemmas",
+        "-l",
         nargs="+",
         required=True,
         help="Lemma(s) to search for",
@@ -52,7 +54,8 @@ Examples:
 
     # Corpus parameters
     parser.add_argument(
-        "--root", "-r",
+        "--root",
+        "-r",
         type=Path,
         default=None,
         help="Root directory of Tesserae corpus (default: auto-detect or download)",
@@ -74,7 +77,8 @@ Examples:
 
     # Output parameters
     parser.add_argument(
-        "--output", "-o",
+        "--output",
+        "-o",
         type=Path,
         help="Output file path (default: auto-generated in cli_output/)",
     )
@@ -90,7 +94,8 @@ Examples:
         help="Output format (default: tsv)",
     )
     parser.add_argument(
-        "--limit", "-n",
+        "--limit",
+        "-n",
         type=int,
         help="Maximum number of results",
     )
@@ -104,7 +109,8 @@ Examples:
 
     # Verbosity
     parser.add_argument(
-        "--quiet", "-q",
+        "--quiet",
+        "-q",
         action="store_true",
         help="Suppress progress messages",
     )
@@ -115,6 +121,20 @@ Examples:
     )
 
     return parser.parse_args(argv)
+
+
+def _format_row(row: dict, sep: str) -> str:
+    """Format a single row for output."""
+    values = []
+    for v in row.values():
+        if isinstance(v, list):
+            v = ";".join(str(x) for x in v)
+        else:
+            v = str(v) if v is not None else ""
+        if sep == "," and ("," in v or '"' in v or "\n" in v):
+            v = f'"{v.replace(chr(34), chr(34) + chr(34))}"'
+        values.append(v)
+    return sep.join(values)
 
 
 def write_results(
@@ -128,43 +148,32 @@ def write_results(
 
         for r in results:
             output.write(json.dumps(r, ensure_ascii=False) + "\n")
-    else:
-        sep = "\t" if fmt == "tsv" else ","
-        # Header
-        if results:
-            output.write(sep.join(results[0].keys()) + "\n")
-        # Rows
+        return
+
+    sep = "\t" if fmt == "tsv" else ","
+    if results:
+        output.write(sep.join(results[0].keys()) + "\n")
         for r in results:
-            values = []
-            for v in r.values():
-                if isinstance(v, list):
-                    v = ";".join(str(x) for x in v)
-                else:
-                    v = str(v) if v is not None else ""
-                if sep == "," and ("," in v or '"' in v or "\n" in v):
-                    v = f'"{v.replace(chr(34), chr(34) + chr(34))}"'
-                values.append(v)
-            output.write(sep.join(values) + "\n")
+            output.write(_format_row(r, sep) + "\n")
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Main entry point."""
-    args = parse_args(argv)
-
-    start_time = time.time()
-
-    # Validate root directory
+def validate_root(args) -> bool:
+    """Validate the root directory exists."""
     if not args.root.exists():
         print(f"Error: Corpus directory not found: {args.root}", file=sys.stderr)
-        return 1
+        return False
+    return True
 
-    # Initialize reader
+
+def initialize_reader(args):
+    """Initialize the TesseraeReader."""
     if not args.quiet:
         print("Initializing reader and NLP pipeline...", file=sys.stderr)
-    reader = TesseraeReader(args.root)
+    return TesseraeReader(args.root)
 
-    # Get fileids if filter specified
-    fileids = None
+
+def get_fileids(reader, args):
+    """Get fileids if filter specified."""
     if args.fileids or args.min_date is not None or args.max_date is not None:
         fileids = reader.fileids(
             match=args.fileids,
@@ -173,56 +182,80 @@ def main(argv: list[str] | None = None) -> int:
         )
         if not fileids:
             print("Warning: No files match the specified filters", file=sys.stderr)
+        return fileids
+    return None
 
-    # Run search
-    if not args.quiet:
-        print(f"Searching for lemmas: {', '.join(args.lemmas)}", file=sys.stderr)
 
-    results_iter = reader.find_sents(
-        lemmas=args.lemmas,
-        fileids=fileids,
-        context=args.context,
-        limit=args.limit,
-    )
-
-    # Collect results with progress
+def collect_results(results_iter, quiet):
+    """Collect results with progress bar."""
     results: list[dict] = []
-    pbar = tqdm(results_iter, desc="Searching", unit=" matches", disable=args.quiet)
+    pbar = tqdm(results_iter, desc="Searching", unit=" matches", disable=quiet)
     for result in pbar:
         results.append(result)
     pbar.close()
+    return results
 
-    search_time = time.time() - start_time
 
-    # Determine output destination
+def determine_output_path(args):
+    """Determine output file path."""
+    if args.output:
+        return args.output
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    first_term = args.lemmas[0]
+    ext = "jsonl" if args.format == "jsonl" else args.format
+    filename = f"{timestamp}-{first_term.lower()}-lemma-search.{ext}"
+    CLI_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    return CLI_OUTPUT_DIR / filename
+
+
+def output_results(args, results):
+    """Output results to file or stdout."""
     if args.no_save:
-        # Output to stdout
         write_results(results, sys.stdout, args.format)
     else:
-        # Determine output path
-        if args.output:
-            output_path = args.output
-        else:
-            # Generate timestamped filename
-            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-            first_term = args.lemmas[0]
-            ext = "jsonl" if args.format == "jsonl" else args.format
-            filename = f"{timestamp}-{first_term.lower()}-lemma-search.{ext}"
-            CLI_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-            output_path = CLI_OUTPUT_DIR / filename
-
+        output_path = determine_output_path(args)
         with open(output_path, "w", encoding="utf-8") as f:
             write_results(results, f, args.format)
         if not args.quiet:
             print(f"Wrote {len(results)} results to {output_path}", file=sys.stderr)
 
-    # Timing info
+
+def print_timing(args, results, search_time):
+    """Print timing information."""
     if args.timing:
         msg = f"\nTiming: {len(results)} results in {search_time:.2f}s"
         print(msg, file=sys.stderr)
         if results:
             rate = len(results) / search_time
             print(f"Rate: {rate:.1f} results/second", file=sys.stderr)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Main entry point."""
+    args = parse_args(argv)
+    start_time = time.time()
+
+    if not validate_root(args):
+        return 1
+
+    reader = initialize_reader(args)
+    fileids = get_fileids(reader, args)
+
+    if not args.quiet:
+        print(f"Searching for lemmas: {', '.join(args.lemmas)}", file=sys.stderr)
+
+    results_iter = reader.find_sents(
+        lemma=args.lemmas,
+        fileids=fileids,
+        context=args.context,
+        limit=args.limit,
+    )
+
+    results = collect_results(results_iter, args.quiet)
+    search_time = time.time() - start_time
+
+    output_results(args, results)
+    print_timing(args, results, search_time)
 
     return 0
 

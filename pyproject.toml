@@ -39,7 +39,7 @@ dev = [
     "mypy>=1.0",
 ]
 models = [
-    "la-core-web-lg @ https://huggingface.co/latincy/la_core_web_lg/resolve/main/la_core_web_lg-3.7.7-py3-none-any.whl",
+    "la-core-web-lg @ https://huggingface.co/latincy/la_core_web_lg/resolve/main/la_core_web_lg-3.8.0-py3-none-any.whl",
 ]
 
 [project.urls]
