@@ -389,128 +389,20 @@ class TesseraeReader(DownloadableCorpusMixin, BaseCorpusReader):
         for fileid, citation, text, _matches in self.search(pattern, fileids, ignore_case):
             yield fileid, citation, text
 
-    def find_sents(
-        self,
-        pattern: str | None = None,
-        forms: list[str] | None = None,
-        lemma: str | list[str] | None = None,
-        matcher_pattern: list[dict] | None = None,
-        fileids: str | list[str] | None = None,
-        ignore_case: bool = True,
-        context: bool = False,
-    ) -> Iterator[dict]:
-        """Find sentences containing specific words/patterns/lemmas.
+    def _get_citation_for_span(self, doc: "Doc", span: "Span") -> str:
+        """Get Tesserae citation for a span.
 
-        This is the main search method for extracting sentences for annotation.
-
-        Args:
-            pattern: Regex pattern to match.
-            forms: List of exact word forms to match.
-            lemma: Lemma or list of lemmas to match (requires NLP - slower but handles all forms).
-            matcher_pattern: spaCy Matcher pattern for advanced queries.
-                A list of token patterns, e.g. [{"POS": "ADJ"}, {"POS": "NOUN"}].
-            fileids: Files to search, or None for all.
-            ignore_case: Whether to ignore case (default True for pattern/forms).
-            context: If True, include surrounding sentences.
-
-        Yields:
-            Dicts with keys: fileid, citation, sentence, matches, (prev_sent, next_sent if context).
-
-        Example:
-            >>> # Fast: regex pattern
-            >>> for hit in reader.find_sents(pattern=r"\\bTheb\\w+\\b"):
-            ...     print(f"{hit['citation']}: {hit['sentence']}")
-
-            >>> # Fast: explicit forms
-            >>> for hit in reader.find_sents(forms=["Caesar", "Caesaris", "Caesarem"]):
-            ...     print(hit['sentence'])
-
-            >>> # Slower but complete: by lemma (single or multiple)
-            >>> for hit in reader.find_sents(lemma="Caesar"):
-            ...     print(hit['sentence'])
-            >>> for hit in reader.find_sents(lemma=["bellum", "pax"]):
-            ...     print(hit['sentence'])
-
-            >>> # spaCy Matcher pattern: ADJ + NOUN combinations
-            >>> for hit in reader.find_sents(matcher_pattern=[{"POS": "ADJ"}, {"POS": "NOUN"}]):
-            ...     print(f"{hit['citation']}: {hit['matches']}")
+        Tesserae files have citation spans in doc.spans["lines"].
         """
-        if matcher_pattern is not None:
-            # Matcher-based search (requires NLP)
-            yield from self._find_sents_by_matcher(matcher_pattern, fileids, context)
-        elif lemma is not None:
-            # Lemma search requires NLP
-            # Normalize to list
-            lemmas = [lemma] if isinstance(lemma, str) else lemma
-            yield from self._find_sents_by_lemma(lemmas, fileids, context)
-        else:
-            # Fast path: regex search
-            yield from self._find_sents_by_pattern(pattern, forms, fileids, ignore_case, context)
+        # Check doc.spans["lines"] for overlapping citation
+        for line_span in doc.spans.get("lines", []):
+            if line_span.start <= span.start < line_span.end:
+                citation = getattr(line_span._, "citation", None)
+                if citation is not None:
+                    return citation
 
-    def _find_sents_by_pattern(
-        self,
-        pattern: str | None,
-        forms: list[str] | None,
-        fileids: str | list[str] | None,
-        ignore_case: bool,
-        context: bool,
-    ) -> Iterator[dict]:
-        """Find sentences by regex pattern (fast path)."""
-        if pattern is None and forms is None:
-            raise ValueError("Must provide either pattern or forms")
-
-        if forms is not None:
-            escaped = [re.escape(f) for f in forms]
-            pattern = r"\b(" + "|".join(escaped) + r")\b"
-
-        flags = re.IGNORECASE if ignore_case else 0
-        regex = re.compile(pattern, flags)
-
-        for doc in self.docs(fileids):
-            sents = list(doc.sents)
-            for i, sent in enumerate(sents):
-                matches = regex.findall(sent.text)
-                if matches:
-                    result = {
-                        "fileid": doc._.fileid,
-                        "citation": self._get_citation_for_span(doc, sent),
-                        "sentence": sent.text,
-                        "matches": matches,
-                    }
-                    if context:
-                        result["prev_sent"] = sents[i - 1].text if i > 0 else None
-                        result["next_sent"] = sents[i + 1].text if i < len(sents) - 1 else None
-                    yield result
-
-    def _find_sents_by_lemma(
-        self,
-        lemmas: list[str],
-        fileids: str | list[str] | None,
-        context: bool,
-    ) -> Iterator[dict]:
-        """Find sentences by lemma(s) (uses NLP)."""
-        target_lemmas = {lem.lower() for lem in lemmas}
-
-        for doc in self.docs(fileids):
-            sents = list(doc.sents)
-            for i, sent in enumerate(sents):
-                matches = [t.text for t in sent if t.lemma_.lower() in target_lemmas]
-                if matches:
-                    # Find which lemmas matched
-                    matched_lemmas = [
-                        t.lemma_.lower() for t in sent if t.lemma_.lower() in target_lemmas
-                    ]
-                    result = {
-                        "fileid": doc._.fileid,
-                        "citation": self._get_citation_for_span(doc, sent),
-                        "sentence": sent.text,
-                        "matches": matches,
-                        "lemmas": list(set(matched_lemmas)),
-                    }
-                    if context:
-                        result["prev_sent"] = sents[i - 1].text if i > 0 else None
-                        result["next_sent"] = sents[i + 1].text if i < len(sents) - 1 else None
-                    yield result
+        # Fallback to base implementation
+        return super()._get_citation_for_span(doc, span)
 
     def _find_sents_by_matcher(
         self,
@@ -519,6 +411,8 @@ class TesseraeReader(DownloadableCorpusMixin, BaseCorpusReader):
         context: bool,
     ) -> Iterator[dict]:
         """Find sentences using spaCy Matcher patterns.
+
+        Override to use Tesserae-specific citation lookup.
 
         Args:
             matcher_pattern: List of token patterns for spaCy Matcher.
@@ -568,14 +462,6 @@ class TesseraeReader(DownloadableCorpusMixin, BaseCorpusReader):
                     result["prev_sent"] = sents[sent_idx - 1].text if sent_idx > 0 else None
                     result["next_sent"] = sents[sent_idx + 1].text if sent_idx < len(sents) - 1 else None
                 yield result
-
-    def _get_citation_for_span(self, doc: "Doc", span: "Span") -> str | None:
-        """Get the citation for a span by finding the overlapping line span."""
-        for line_span in doc.spans.get("lines", []):
-            # Check if spans overlap
-            if span.start < line_span.end and span.end > line_span.start:
-                return line_span._.citation
-        return None
 
     def export_search_results(
         self,

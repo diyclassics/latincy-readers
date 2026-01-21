@@ -720,3 +720,188 @@ class BaseCorpusReader(ABC):
         if filter_nums and token.like_num:
             return False
         return True
+
+    # -------------------------------------------------------------------------
+    # Sentence search methods
+    # -------------------------------------------------------------------------
+
+    def _get_citation_for_span(self, doc: "Doc", span: "Span") -> str:
+        """Get citation for a span (sentence).
+
+        Override in subclasses for format-specific citations.
+
+        Args:
+            doc: The document containing the span.
+            span: The span to get citation for.
+
+        Returns:
+            Citation string.
+        """
+        # Check if span has a citation attribute
+        citation = getattr(span._, "citation", None)
+        if citation is not None:
+            return citation
+
+        # Check if span overlaps with any citation-bearing spans
+        for span_key in doc.spans:
+            for labeled_span in doc.spans[span_key]:
+                if labeled_span.start <= span.start < labeled_span.end:
+                    span_citation = getattr(labeled_span._, "citation", None)
+                    if span_citation is not None:
+                        return span_citation
+
+        # Fallback to fileid:sent_index
+        fileid = doc._.fileid or "unknown"
+        sents = list(doc.sents)
+        for i, s in enumerate(sents):
+            if s.start == span.start:
+                return f"{fileid}:sent{i}"
+        return f"{fileid}:sent?"
+
+    def find_sents(
+        self,
+        pattern: str | None = None,
+        forms: list[str] | None = None,
+        lemma: str | list[str] | None = None,
+        matcher_pattern: list[dict] | None = None,
+        fileids: str | list[str] | None = None,
+        ignore_case: bool = True,
+        context: bool = False,
+    ) -> Iterator[dict]:
+        """Find sentences containing specific words/patterns/lemmas.
+
+        This is the main search method for extracting sentences for annotation.
+
+        Args:
+            pattern: Regex pattern to match.
+            forms: List of exact word forms to match.
+            lemma: Lemma or list of lemmas to match (requires NLP - slower).
+            matcher_pattern: spaCy Matcher pattern for advanced queries.
+            fileids: Files to search, or None for all.
+            ignore_case: Whether to ignore case (default True for pattern/forms).
+            context: If True, include surrounding sentences.
+
+        Yields:
+            Dicts with keys: fileid, citation, sentence, matches, (prev_sent, next_sent).
+
+        Example:
+            >>> for hit in reader.find_sents(pattern=r"\\bTheb\\w+\\b"):
+            ...     print(f"{hit['citation']}: {hit['sentence']}")
+
+            >>> for hit in reader.find_sents(lemma=["bellum", "pax"]):
+            ...     print(hit['sentence'])
+        """
+        if matcher_pattern is not None:
+            yield from self._find_sents_by_matcher(matcher_pattern, fileids, context)
+        elif lemma is not None:
+            lemmas = [lemma] if isinstance(lemma, str) else lemma
+            yield from self._find_sents_by_lemma(lemmas, fileids, context)
+        else:
+            yield from self._find_sents_by_pattern(pattern, forms, fileids, ignore_case, context)
+
+    def _find_sents_by_pattern(
+        self,
+        pattern: str | None,
+        forms: list[str] | None,
+        fileids: str | list[str] | None,
+        ignore_case: bool,
+        context: bool,
+    ) -> Iterator[dict]:
+        """Find sentences by regex pattern (fast path)."""
+        if pattern is None and forms is None:
+            raise ValueError("Must provide either pattern or forms")
+
+        if forms is not None:
+            escaped = [re.escape(f) for f in forms]
+            pattern = r"\b(" + "|".join(escaped) + r")\b"
+
+        flags = re.IGNORECASE if ignore_case else 0
+        regex = re.compile(pattern, flags)
+
+        for doc in self.docs(fileids):
+            sents = list(doc.sents)
+            for i, sent in enumerate(sents):
+                matches = regex.findall(sent.text)
+                if matches:
+                    result = {
+                        "fileid": doc._.fileid,
+                        "citation": self._get_citation_for_span(doc, sent),
+                        "sentence": sent.text,
+                        "matches": matches,
+                    }
+                    if context:
+                        result["prev_sent"] = sents[i - 1].text if i > 0 else None
+                        result["next_sent"] = sents[i + 1].text if i < len(sents) - 1 else None
+                    yield result
+
+    def _find_sents_by_lemma(
+        self,
+        lemmas: list[str],
+        fileids: str | list[str] | None,
+        context: bool,
+    ) -> Iterator[dict]:
+        """Find sentences by lemma(s) (uses NLP)."""
+        target_lemmas = {lem.lower() for lem in lemmas}
+
+        for doc in self.docs(fileids):
+            sents = list(doc.sents)
+            for i, sent in enumerate(sents):
+                matches = [t.text for t in sent if t.lemma_.lower() in target_lemmas]
+                if matches:
+                    matched_lemmas = [
+                        t.lemma_.lower() for t in sent if t.lemma_.lower() in target_lemmas
+                    ]
+                    result = {
+                        "fileid": doc._.fileid,
+                        "citation": self._get_citation_for_span(doc, sent),
+                        "sentence": sent.text,
+                        "matches": matches,
+                        "lemmas": list(set(matched_lemmas)),
+                    }
+                    if context:
+                        result["prev_sent"] = sents[i - 1].text if i > 0 else None
+                        result["next_sent"] = sents[i + 1].text if i < len(sents) - 1 else None
+                    yield result
+
+    def _find_sents_by_matcher(
+        self,
+        matcher_pattern: list[dict],
+        fileids: str | list[str] | None,
+        context: bool,
+    ) -> Iterator[dict]:
+        """Find sentences using spaCy Matcher patterns."""
+        from spacy.matcher import Matcher
+
+        nlp = self.nlp
+        if nlp is None:
+            raise ValueError("Matcher patterns require NLP pipeline")
+
+        matcher = Matcher(nlp.vocab)
+        matcher.add("PATTERN", [matcher_pattern])
+
+        for doc in self.docs(fileids):
+            sents = list(doc.sents)
+            matches = matcher(doc)
+
+            matched_sents: dict[int, list[str]] = {}
+            for _, start, end in matches:
+                match_span = doc[start:end]
+                for i, sent in enumerate(sents):
+                    if sent.start <= start < sent.end:
+                        if i not in matched_sents:
+                            matched_sents[i] = []
+                        matched_sents[i].append(match_span.text)
+                        break
+
+            for i, match_texts in matched_sents.items():
+                sent = sents[i]
+                result = {
+                    "fileid": doc._.fileid,
+                    "citation": self._get_citation_for_span(doc, sent),
+                    "sentence": sent.text,
+                    "matches": match_texts,
+                }
+                if context:
+                    result["prev_sent"] = sents[i - 1].text if i > 0 else None
+                    result["next_sent"] = sents[i + 1].text if i < len(sents) - 1 else None
+                yield result
