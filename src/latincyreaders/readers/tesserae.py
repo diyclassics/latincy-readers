@@ -9,14 +9,13 @@ followed by text:
 
 from __future__ import annotations
 
-import os
 import re
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator, TYPE_CHECKING
 
 from latincyreaders.core.base import BaseCorpusReader, AnnotationLevel
+from latincyreaders.core.download import DownloadableCorpusMixin
 
 if TYPE_CHECKING:
     from spacy.tokens import Doc, Span
@@ -31,7 +30,7 @@ class TesseraeLine:
     line_number: int
 
 
-class TesseraeReader(BaseCorpusReader):
+class TesseraeReader(DownloadableCorpusMixin, BaseCorpusReader):
     """Reader for Tesserae-format Latin texts with citation preservation.
 
     The Tesserae format uses angle-bracket citations at the start of each line:
@@ -64,6 +63,8 @@ class TesseraeReader(BaseCorpusReader):
     CITATION_PATTERN = re.compile(r"<([^>]+)>\s*(.+)")
     CORPUS_URL = "https://github.com/cltk/lat_text_tesserae.git"
     ENV_VAR = "TESSERAE_PATH"
+    DEFAULT_SUBDIR = "lat_text_tesserae/texts"
+    _FILE_CHECK_PATTERN = "**/*.tess"
 
     def __init__(
         self,
@@ -72,6 +73,8 @@ class TesseraeReader(BaseCorpusReader):
         encoding: str = "utf-8",
         annotation_level: AnnotationLevel = AnnotationLevel.BASIC,
         auto_download: bool = True,
+        cache: bool = True,
+        cache_maxsize: int = 128,
     ):
         """Initialize the Tesserae reader.
 
@@ -81,96 +84,15 @@ class TesseraeReader(BaseCorpusReader):
             encoding: Text encoding.
             annotation_level: How much NLP annotation to apply.
             auto_download: If True and corpus not found, offer to download.
+            cache: If True (default), cache processed Doc objects for reuse.
+            cache_maxsize: Maximum number of documents to cache (default 128).
         """
         if root is None:
             root = self._get_default_root(auto_download)
-        super().__init__(root, fileids, encoding, annotation_level)
-
-    @classmethod
-    def default_root(cls) -> Path:
-        """Return the default corpus location.
-
-        Checks in order:
-        1. TESSERAE_PATH environment variable
-        2. ~/latincy_data/tesserae
-
-        Returns:
-            Path to the default corpus location.
-        """
-        if env_path := os.environ.get(cls.ENV_VAR):
-            return Path(env_path)
-        return Path.home() / "latincy_data" / "lat_text_tesserae" / "texts"
-
-    @classmethod
-    def _get_default_root(cls, auto_download: bool = True) -> Path:
-        """Get the corpus root, downloading if necessary.
-
-        Args:
-            auto_download: If True and corpus not found, offer to download.
-
-        Returns:
-            Path to the corpus.
-
-        Raises:
-            FileNotFoundError: If corpus not found and auto_download is False.
-        """
-        root = cls.default_root()
-
-        if root.exists() and any(root.glob("**/*.tess")):
-            return root
-
-        if not auto_download:
-            raise FileNotFoundError(
-                f"Tesserae corpus not found at {root}. "
-                f"Set {cls.ENV_VAR} environment variable or pass root= explicitly. "
-                f"Or set auto_download=True to download automatically."
-            )
-
-        # Prompt for download
-        print(f"Tesserae corpus not found at {root}")
-        response = input("Download from GitHub? [y/N]: ").strip().lower()
-
-        if response in ("y", "yes"):
-            cls.download(root)
-            return root
-        else:
-            raise FileNotFoundError(
-                f"Tesserae corpus not found at {root}. "
-                f"Download manually from {cls.CORPUS_URL}"
-            )
-
-    @classmethod
-    def download(cls, destination: Path | None = None) -> Path:
-        """Download the Tesserae corpus from GitHub.
-
-        Args:
-            destination: Where to clone the corpus. Defaults to default_root().
-
-        Returns:
-            Path to the downloaded corpus.
-        """
-        if destination is None:
-            destination = cls.default_root()
-
-        destination = Path(destination)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-
-        print(f"Cloning Tesserae corpus to {destination}...")
-        try:
-            subprocess.run(
-                ["git", "clone", "--depth", "1", cls.CORPUS_URL, str(destination)],
-                check=True,
-            )
-            print(f"Successfully downloaded to {destination}")
-        except subprocess.CalledProcessError as e:
-            raise RuntimeError(f"Failed to clone repository: {e}") from e
-        except FileNotFoundError:
-            raise RuntimeError(
-                "git not found. Please install git or download manually from "
-                f"{cls.CORPUS_URL}"
-            )
-
-        return destination
+        super().__init__(
+            root, fileids, encoding, annotation_level,
+            cache=cache, cache_maxsize=cache_maxsize
+        )
 
     @classmethod
     def _default_file_pattern(cls) -> str:
@@ -260,6 +182,9 @@ class TesseraeReader(BaseCorpusReader):
         Each Doc has a "lines" span group containing citation-annotated spans.
         Metadata from JSON files is merged with file-level metadata.
 
+        When caching is enabled (default), documents are stored after first access
+        and returned from cache on subsequent requests for the same fileid.
+
         Args:
             fileids: Files to process, or None for all.
 
@@ -275,6 +200,19 @@ class TesseraeReader(BaseCorpusReader):
 
         for path in self._iter_paths(fileids):
             fileid = str(path.relative_to(self._root))
+
+            # Check cache first
+            if self._cache_enabled and fileid in self._cache:
+                self._cache_hits += 1
+                # Move to end for LRU ordering
+                self._cache.move_to_end(fileid)
+                yield self._cache[fileid]
+                continue
+
+            # Cache miss - process the file
+            if self._cache_enabled:
+                self._cache_misses += 1
+
             # Get JSON metadata
             json_metadata = self.get_metadata(fileid)
 
@@ -289,6 +227,13 @@ class TesseraeReader(BaseCorpusReader):
                 # Create citation spans
                 lines_data = file_metadata.get("_lines", [])
                 doc.spans["lines"] = self._make_line_spans(doc, lines_data)
+
+                # Store in cache if enabled
+                if self._cache_enabled:
+                    # Evict oldest if at capacity
+                    while len(self._cache) >= self._cache_maxsize:
+                        self._cache.popitem(last=False)
+                    self._cache[fileid] = doc
 
                 yield doc
 

@@ -47,6 +47,8 @@ class TxtdownReader(BaseCorpusReader):
         fileids: str | None = None,
         encoding: str = "utf-8",
         annotation_level: AnnotationLevel = AnnotationLevel.BASIC,
+        cache: bool = True,
+        cache_maxsize: int = 128,
     ):
         """Initialize the txtdown reader.
 
@@ -55,6 +57,8 @@ class TxtdownReader(BaseCorpusReader):
             fileids: Glob pattern for selecting files. Defaults to "**/*.txtd".
             encoding: Text encoding.
             annotation_level: NLP annotation level.
+            cache: If True (default), cache processed Doc objects for reuse.
+            cache_maxsize: Maximum number of documents to cache (default 128).
 
         Raises:
             ImportError: If txtdown package is not installed.
@@ -63,7 +67,10 @@ class TxtdownReader(BaseCorpusReader):
             raise ImportError(
                 "txtdown package required. Install with: pip install txtdown"
             )
-        super().__init__(root, fileids, encoding, annotation_level)
+        super().__init__(
+            root, fileids, encoding, annotation_level,
+            cache=cache, cache_maxsize=cache_maxsize
+        )
 
     @classmethod
     def _default_file_pattern(cls) -> str:

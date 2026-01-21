@@ -2,7 +2,7 @@
 
 Corpus readers for Latin texts with [LatinCy](https://github.com/diyclassics/latincy)/spaCy integration.
 
-Version 1.0.0a1; Python 3.10+; LatinCy 3.8.0+
+Version 1.0.0; Python 3.10+; LatinCy 3.8.0+
 
 ## Installation
 
@@ -24,7 +24,10 @@ pip install -e ".[dev]"
 ```python
 from latincyreaders import TesseraeReader, AnnotationLevel
 
-# Initialize reader
+# Auto-download corpus on first use
+reader = TesseraeReader()
+
+# Or specify a custom path
 reader = TesseraeReader("/path/to/tesserae/corpus")
 
 # Iterate over documents as spaCy Docs
@@ -42,15 +45,34 @@ for text in reader.texts():
 
 ## Readers
 
-| Reader | Format | Description |
-|--------|--------|-------------|
-| `TesseraeReader` | `.tess` | CLTK Tesserae corpus format |
-| `PlaintextReader` | `.txt` | Plain text files |
-| `LatinLibraryReader` | `.txt` | Latin Library-style plaintext |
-| `TEIReader` | `.xml` | TEI-XML documents |
-| `PerseusReader` | `.xml` | Perseus Digital Library TEI |
-| `CamenaReader` | `.xml` | CAMENA Neo-Latin corpus |
-| `TxtdownReader` | `.txtd` | Txtdown format with citations |
+| Reader | Format | Auto-Download | Description |
+|--------|--------|---------------|-------------|
+| `TesseraeReader` | `.tess` | Yes | CLTK Tesserae corpus format |
+| `PlaintextReader` | `.txt` | No | Plain text files |
+| `LatinLibraryReader` | `.txt` | Yes | Latin Library corpus |
+| `TEIReader` | `.xml` | No | TEI-XML documents |
+| `PerseusReader` | `.xml` | No | Perseus Digital Library TEI |
+| `CamenaReader` | `.xml` | Yes | CAMENA Neo-Latin corpus |
+| `TxtdownReader` | `.txtd` | No | Txtdown format with citations |
+
+### Auto-Download
+
+Readers with auto-download support will automatically fetch the corpus on first use:
+
+```python
+# Downloads to ~/latincy_data/lat_text_tesserae/texts if not found
+reader = TesseraeReader()
+
+# Disable auto-download
+reader = TesseraeReader(auto_download=False)
+
+# Use environment variable for custom location
+# export TESSERAE_PATH=/custom/path
+reader = TesseraeReader()
+
+# Manual download to specific location
+TesseraeReader.download("/path/to/destination")
+```
 
 ## Core API
 
@@ -63,7 +85,41 @@ reader.docs(fileids=...)      # spaCy Doc objects (generator)
 reader.sents(fileids=...)     # Sentence spans (generator)
 reader.tokens(fileids=...)    # Token objects (generator)
 reader.metadata(fileids=...)  # File metadata (generator)
-reader.describe()             # Corpus statistics
+```
+
+### FileSelector: Fluent File Filtering
+
+Use the `select()` method for complex file queries combining filename patterns and metadata:
+
+```python
+# Filter by filename pattern (regex)
+vergil_docs = reader.select().match(r"vergil\..*")
+
+# Filter by metadata
+epics = reader.select().where(genre="epic")
+
+# Multiple conditions (AND)
+vergil_epics = reader.select().where(author="Vergil", genre="epic")
+
+# Match any of multiple values
+major_authors = reader.select().where(author__in=["Vergil", "Ovid", "Horace"])
+
+# Date ranges
+augustan = reader.select().date_range(-50, 50)
+
+# Chain multiple filters
+selection = (reader.select()
+    .match(r".*aen.*")
+    .where(genre="epic")
+    .date_range(-50, 50))
+
+# Use with docs(), sents(), etc.
+for doc in reader.docs(selection):
+    print(doc._.fileid)
+
+# Preview results
+print(selection.preview(5))
+print(f"Found {len(selection)} files")
 ```
 
 ### Search API
@@ -76,7 +132,52 @@ reader.search(pattern=r"\bbell\w+")
 reader.find_sents(forms=["amor", "amoris"])
 
 # Lemma-based search (requires NLP)
-reader.find_sents(lemmas=["amo", "bellum"])
+reader.find_sents(lemma="amo")
+
+# spaCy Matcher patterns
+reader.find_sents(matcher_pattern=[{"POS": "ADJ"}, {"POS": "NOUN"}])
+```
+
+### Text Analysis
+
+```python
+# Build a concordance (word -> citations mapping)
+conc = reader.concordance(basis="lemma")
+print(conc["amor"])  # ['<catull. 1.1>', '<verg. aen. 4.1>', ...]
+
+# Keyword in Context
+for hit in reader.kwic("amor", window=5, by_lemma=True):
+    print(f"{hit['left']} [{hit['match']}] {hit['right']}")
+    print(f"  -- {hit['citation']}")
+
+# N-grams
+for ngram in reader.ngrams(n=2, basis="lemma"):
+    print(ngram)  # "qui do", "do lepidus", ...
+
+# Skip-grams (n-grams with gaps)
+for sg in reader.skipgrams(n=2, k=1):
+    print(sg)
+```
+
+### Document Caching
+
+Documents are cached by default for better performance when accessing the same file multiple times:
+
+```python
+# Caching enabled by default
+reader = TesseraeReader()
+
+# Disable caching
+reader = TesseraeReader(cache=False)
+
+# Configure cache size
+reader = TesseraeReader(cache_maxsize=256)
+
+# Check cache statistics
+print(reader.cache_stats())  # {'hits': 5, 'misses': 3, 'size': 3, 'maxsize': 128}
+
+# Clear the cache
+reader.clear_cache()
 ```
 
 ### Annotation Levels
@@ -90,13 +191,44 @@ from latincyreaders import AnnotationLevel
 reader.texts()
 
 # Tokenization only
-reader.docs(annotation_level=AnnotationLevel.TOKENIZE)
+reader = TesseraeReader(annotation_level=AnnotationLevel.TOKENIZE)
 
 # Basic: tokenization + sentence boundaries (default)
-reader.docs(annotation_level=AnnotationLevel.BASIC)
+reader = TesseraeReader(annotation_level=AnnotationLevel.BASIC)
 
 # Full pipeline: POS, lemma, morphology, NER
-reader.docs(annotation_level=AnnotationLevel.FULL)
+reader = TesseraeReader(annotation_level=AnnotationLevel.FULL)
+```
+
+### Metadata Management
+
+```python
+from latincyreaders import MetadataManager, MetadataSchema
+
+# Load and merge metadata from JSON files
+manager = MetadataManager("/path/to/corpus")
+
+# Access metadata
+meta = manager.get("vergil.aen.tess")
+print(meta["author"], meta["date"])
+
+# Filter files by metadata
+for fileid in manager.filter_by(author="Vergil", genre="epic"):
+    print(fileid)
+
+# Date range filtering
+for fileid in manager.filter_by_range("date", -50, 50):
+    print(fileid)
+
+# Validate metadata against a schema
+schema = MetadataSchema(
+    required={"author": str, "title": str},
+    optional={"date": int, "genre": str}
+)
+manager = MetadataManager("/path/to/corpus", schema=schema)
+result = manager.validate()
+if not result.is_valid:
+    print(result.errors)
 ```
 
 ## Corpora Supported
@@ -104,7 +236,7 @@ reader.docs(annotation_level=AnnotationLevel.FULL)
 - [CLTK Tesserae Latin Corpus](https://github.com/cltk/lat_text_tesserae)
 - [CLTK Tesserae Greek Corpus](https://github.com/cltk/grc_text_tesserae)
 - [Perseus Digital Library TEI](https://www.perseus.tufts.edu/)
-- [Latin Library](https://www.thelatinlibrary.com/)
+- [Latin Library](https://github.com/cltk/lat_text_latin_library)
 - [CAMENA Neo-Latin](https://github.com/nevenjovanovic/camena-neolatinlit)
 - [Open Greek & Latin CSEL](https://github.com/OpenGreekAndLatin/csel-dev)
 - Any plaintext or TEI-XML collection

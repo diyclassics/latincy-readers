@@ -208,7 +208,7 @@ class TestTesseraeReader:
         """auto_download=False raises FileNotFoundError for missing corpus."""
         # Point to a non-existent directory
         monkeypatch.setenv("TESSERAE_PATH", str(tmp_path / "nonexistent"))
-        with pytest.raises(FileNotFoundError, match="Tesserae corpus not found"):
+        with pytest.raises(FileNotFoundError, match="corpus not found"):
             TesseraeReader(root=None, auto_download=False)
 
     def test_default_root_returns_path(self):

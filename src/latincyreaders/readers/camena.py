@@ -8,7 +8,6 @@ Repository: https://github.com/nevenjovanovic/camena-neolatinlit
 
 from __future__ import annotations
 
-import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -16,17 +15,14 @@ from typing import TYPE_CHECKING
 from lxml import etree
 
 from latincyreaders.core.base import AnnotationLevel
+from latincyreaders.core.download import DownloadableCorpusMixin
 from latincyreaders.readers.tei import TEIReader
 
 if TYPE_CHECKING:
     from spacy.tokens import Doc, Span
 
 
-# Default data directory for latincy-readers
-LATINCY_DATA = Path.home() / "latincy_data"
-
-
-class CamenaCorpusReader(TEIReader):
+class CamenaCorpusReader(DownloadableCorpusMixin, TEIReader):
     """Reader for CAMENA Neo-Latin corpus.
 
     The CAMENA corpus contains Neo-Latin texts organized into collections:
@@ -34,6 +30,13 @@ class CamenaCorpusReader(TEIReader):
     - HISTORICA & POLITICA: Historical and political texts
     - THESAURUS ERUDITIONIS: Reference materials (dictionaries, handbooks)
     - CERA: Printed Latin letters from German scholars
+
+    If no root path is provided, looks for the corpus in:
+    1. The path specified by CAMENA_ROOT environment variable
+    2. ~/latincy_data/camena-neolatinlit
+
+    If the corpus is not found and auto_download=True (default), offers to
+    download from GitHub.
 
     Example:
         >>> reader = CamenaCorpusReader()  # Uses default location
@@ -44,11 +47,16 @@ class CamenaCorpusReader(TEIReader):
         >>> reader = CamenaCorpusReader(fileids="poemata/**/*.xml")
         >>> for doc in reader.docs():
         ...     print(doc.text[:100])
+
+    Attributes:
+        CORPUS_URL: GitHub URL for downloading the corpus.
+        ENV_VAR: Environment variable for custom corpus path.
     """
 
     CORPUS_URL = "https://github.com/nevenjovanovic/camena-neolatinlit.git"
     ENV_VAR = "CAMENA_ROOT"
-    CORPUS_NAME = "camena-neolatinlit"
+    DEFAULT_SUBDIR = "camena-neolatinlit"
+    _FILE_CHECK_PATTERN = "**/*.xml"
 
     # Known collections in the corpus
     COLLECTIONS = ("poemata", "cera", "historica-et-politica", "thesaurus")
@@ -62,6 +70,8 @@ class CamenaCorpusReader(TEIReader):
         include_front: bool = True,
         remove_notes: bool = True,
         auto_download: bool = True,
+        cache: bool = True,
+        cache_maxsize: int = 128,
     ):
         """Initialize the CAMENA reader.
 
@@ -73,13 +83,11 @@ class CamenaCorpusReader(TEIReader):
             include_front: If True, include front matter (prefaces, dedications).
             remove_notes: Whether to remove <note> elements.
             auto_download: If True and corpus not found, prompt to download.
+            cache: If True (default), cache processed Doc objects for reuse.
+            cache_maxsize: Maximum number of documents to cache (default 128).
         """
         if root is None:
-            root = self.default_root()
-
-        root = Path(root)
-        if not root.exists() and auto_download:
-            self._prompt_download(root)
+            root = self._get_default_root(auto_download)
 
         # CAMENA doesn't use namespaces consistently
         super().__init__(
@@ -89,61 +97,10 @@ class CamenaCorpusReader(TEIReader):
             annotation_level=annotation_level,
             namespaces=None,
             remove_notes=remove_notes,
+            cache=cache,
+            cache_maxsize=cache_maxsize,
         )
         self._include_front = include_front
-
-    @classmethod
-    def default_root(cls) -> Path:
-        """Get the default corpus root from env var or latincy_data location."""
-        import os
-
-        env_root = os.environ.get(cls.ENV_VAR)
-        if env_root:
-            return Path(env_root)
-        return LATINCY_DATA / cls.CORPUS_NAME
-
-    @classmethod
-    def _prompt_download(cls, root: Path) -> None:
-        """Prompt user to download the corpus if not found."""
-        print(f"CAMENA corpus not found at: {root}")
-        print(f"Would you like to download it? This will clone from:")
-        print(f"  {cls.CORPUS_URL}")
-        response = input("Download? [y/N]: ").strip().lower()
-        if response in ("y", "yes"):
-            cls.download(root)
-
-    @classmethod
-    def download(cls, root: Path | None = None) -> Path:
-        """Download the CAMENA corpus from GitHub.
-
-        Args:
-            root: Where to clone. If None, uses default location.
-
-        Returns:
-            Path to downloaded corpus.
-        """
-        if root is None:
-            root = cls.default_root()
-
-        root = Path(root)
-
-        if root.exists():
-            print(f"Corpus already exists at: {root}")
-            return root
-
-        # Create parent directories
-        root.parent.mkdir(parents=True, exist_ok=True)
-
-        print(f"Cloning CAMENA corpus to: {root}")
-        print("This may take a while (1,700+ XML files)...")
-
-        subprocess.run(
-            ["git", "clone", "--depth", "1", cls.CORPUS_URL, str(root)],
-            check=True,
-        )
-
-        print(f"Download complete: {root}")
-        return root
 
     def _get_body(self, root_elem: etree._Element) -> etree._Element | None:
         """Extract TEI body and optionally front matter.

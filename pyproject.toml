@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "latincy-readers"
-version = "1.0.0a1"
+version = "1.0.0"
 description = "Corpus readers for Latin texts with LatinCy/spaCy integration"
 readme = "README.md"
 license = "MIT"
@@ -14,7 +14,7 @@ authors = [
 ]
 keywords = ["latin", "nlp", "corpus", "spacy", "classical-languages", "latincy"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",

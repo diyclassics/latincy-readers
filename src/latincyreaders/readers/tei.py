@@ -46,6 +46,8 @@ class TEIReader(BaseCorpusReader):
         annotation_level: AnnotationLevel = AnnotationLevel.BASIC,
         namespaces: dict[str, str] | None = None,
         remove_notes: bool = True,
+        cache: bool = True,
+        cache_maxsize: int = 128,
     ):
         """Initialize the TEI reader.
 
@@ -56,12 +58,16 @@ class TEIReader(BaseCorpusReader):
             annotation_level: NLP annotation level.
             namespaces: XML namespaces to use. If None, tries both with and without TEI namespace.
             remove_notes: Whether to remove <note> elements from text.
+            cache: If True (default), cache processed Doc objects for reuse.
+            cache_maxsize: Maximum number of documents to cache (default 128).
         """
         super().__init__(
             root=root,
             fileids=fileids,
             encoding=encoding,
             annotation_level=annotation_level,
+            cache=cache,
+            cache_maxsize=cache_maxsize,
         )
         self._namespaces = namespaces
         self._remove_notes = remove_notes
@@ -298,6 +304,8 @@ class PerseusReader(TEIReader):
         encoding: str = "utf-8",
         annotation_level: AnnotationLevel = AnnotationLevel.BASIC,
         remove_notes: bool = True,
+        cache: bool = True,
+        cache_maxsize: int = 128,
     ):
         """Initialize the Perseus reader.
 
@@ -307,6 +315,8 @@ class PerseusReader(TEIReader):
             encoding: Text encoding.
             annotation_level: NLP annotation level.
             remove_notes: Whether to remove <note> elements.
+            cache: If True (default), cache processed Doc objects for reuse.
+            cache_maxsize: Maximum number of documents to cache (default 128).
         """
         super().__init__(
             root=root,
@@ -315,6 +325,8 @@ class PerseusReader(TEIReader):
             annotation_level=annotation_level,
             namespaces=None,  # Perseus files often don't use namespaces
             remove_notes=remove_notes,
+            cache=cache,
+            cache_maxsize=cache_maxsize,
         )
 
     def headers(self, fileids: str | list[str] | None = None) -> Iterator[dict]:

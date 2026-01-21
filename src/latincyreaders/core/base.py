@@ -11,6 +11,7 @@ import json
 import re
 import unicodedata
 from abc import ABC, abstractmethod
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Iterator, TYPE_CHECKING
 
@@ -19,6 +20,7 @@ from latincyreaders.nlp.pipeline import AnnotationLevel, get_nlp
 if TYPE_CHECKING:
     from spacy import Language
     from spacy.tokens import Doc, Span, Token
+    from latincyreaders.core.selector import FileSelector
 
 # Re-export for convenience
 __all__ = ["BaseCorpusReader", "AnnotationLevel"]
@@ -53,6 +55,8 @@ class BaseCorpusReader(ABC):
         encoding: str = "utf-8",
         annotation_level: AnnotationLevel = AnnotationLevel.BASIC,
         metadata_pattern: str = "metadata/*.json",
+        cache: bool = True,
+        cache_maxsize: int = 128,
     ):
         """Initialize the corpus reader.
 
@@ -62,6 +66,8 @@ class BaseCorpusReader(ABC):
             encoding: Text encoding for reading files.
             annotation_level: How much NLP annotation to apply.
             metadata_pattern: Glob pattern for metadata JSON files. Set to None to disable.
+            cache: If True (default), cache processed Doc objects for reuse.
+            cache_maxsize: Maximum number of documents to cache (default 128).
         """
         self._root = Path(root).resolve()
         self._fileids_pattern = fileids or self._default_file_pattern()
@@ -70,6 +76,13 @@ class BaseCorpusReader(ABC):
         self._nlp: Language | None = None  # Lazy loaded
         self._metadata_pattern = metadata_pattern
         self._metadata: dict[str, dict[str, Any]] | None = None  # Lazy loaded
+
+        # Caching
+        self._cache_enabled = cache
+        self._cache_maxsize = cache_maxsize
+        self._cache: OrderedDict[str, "Doc"] = OrderedDict()
+        self._cache_hits = 0
+        self._cache_misses = 0
 
     @property
     def root(self) -> Path:
@@ -87,6 +100,34 @@ class BaseCorpusReader(ABC):
     def annotation_level(self) -> AnnotationLevel:
         """Current annotation level."""
         return self._annotation_level
+
+    @property
+    def cache_enabled(self) -> bool:
+        """Whether document caching is enabled."""
+        return self._cache_enabled
+
+    def cache_stats(self) -> dict[str, int]:
+        """Return cache statistics.
+
+        Returns:
+            Dict with keys:
+                - hits: Number of cache hits
+                - misses: Number of cache misses
+                - size: Current number of cached documents
+                - maxsize: Maximum cache size
+        """
+        return {
+            "hits": self._cache_hits,
+            "misses": self._cache_misses,
+            "size": len(self._cache),
+            "maxsize": self._cache_maxsize,
+        }
+
+    def clear_cache(self) -> None:
+        """Clear the document cache and reset statistics."""
+        self._cache.clear()
+        self._cache_hits = 0
+        self._cache_misses = 0
 
     def _load_metadata(self) -> dict[str, dict[str, Any]]:
         """Load and aggregate metadata from JSON files.
@@ -184,11 +225,37 @@ class BaseCorpusReader(ABC):
         # Natural sort (handles numbers correctly: part.1, part.2, ..., part.10)
         return natsorted(result)
 
-    def _resolve_fileids(self, fileids: str | list[str] | None) -> list[str]:
+    def select(self) -> "FileSelector":
+        """Create a FileSelector for fluent file filtering.
+
+        Returns a FileSelector that allows chaining filters on filenames
+        and metadata. The resulting selection can be passed to docs(),
+        texts(), sents(), etc.
+
+        Returns:
+            A new FileSelector instance.
+
+        Example:
+            >>> # Select epic poetry by Vergil
+            >>> selection = reader.select().where(author="Vergil", genre="epic")
+            >>> for doc in reader.docs(selection):
+            ...     print(doc._.fileid)
+
+            >>> # Select files by date range
+            >>> augustan = reader.select().date_range(-50, 50)
+            >>> print(f"Found {len(augustan)} Augustan texts")
+        """
+        from latincyreaders.core.selector import FileSelector
+
+        return FileSelector(self)
+
+    def _resolve_fileids(
+        self, fileids: str | list[str] | "FileSelector" | None
+    ) -> list[str]:
         """Resolve fileids argument to a list of file identifiers.
 
         Args:
-            fileids: Single fileid, list of fileids, or None for all files.
+            fileids: Single fileid, list of fileids, FileSelector, or None for all files.
 
         Returns:
             List of file identifiers.
@@ -197,6 +264,7 @@ class BaseCorpusReader(ABC):
             return self.fileids()
         if isinstance(fileids, str):
             return [fileids]
+        # Handle any iterable (including FileSelector)
         return list(fileids)
 
     def _iter_paths(self, fileids: str | list[str] | None = None) -> Iterator[Path]:
@@ -252,6 +320,9 @@ class BaseCorpusReader(ABC):
         The level of annotation depends on the reader's annotation_level setting.
         Metadata from JSON files is merged with any metadata from _parse_file().
 
+        When caching is enabled (default), documents are stored after first access
+        and returned from cache on subsequent requests for the same fileid.
+
         Args:
             fileids: Files to process, or None for all.
 
@@ -267,6 +338,19 @@ class BaseCorpusReader(ABC):
 
         for path in self._iter_paths(fileids):
             fileid = str(path.relative_to(self._root))
+
+            # Check cache first
+            if self._cache_enabled and fileid in self._cache:
+                self._cache_hits += 1
+                # Move to end for LRU ordering
+                self._cache.move_to_end(fileid)
+                yield self._cache[fileid]
+                continue
+
+            # Cache miss - process the file
+            if self._cache_enabled:
+                self._cache_misses += 1
+
             # Get JSON metadata and merge with file-level metadata
             json_metadata = self.get_metadata(fileid)
 
@@ -276,6 +360,14 @@ class BaseCorpusReader(ABC):
                 doc._.fileid = fileid
                 # Merge: JSON metadata as base, file metadata overrides
                 doc._.metadata = {**json_metadata, **file_metadata}
+
+                # Store in cache if enabled
+                if self._cache_enabled:
+                    # Evict oldest if at capacity
+                    while len(self._cache) >= self._cache_maxsize:
+                        self._cache.popitem(last=False)
+                    self._cache[fileid] = doc
+
                 yield doc
 
     def sents(

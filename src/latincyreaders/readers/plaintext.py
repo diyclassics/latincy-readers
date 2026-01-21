@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Iterator, TYPE_CHECKING
 
 from latincyreaders.core.base import BaseCorpusReader, AnnotationLevel
+from latincyreaders.core.download import DownloadableCorpusMixin
 
 if TYPE_CHECKING:
     from spacy.tokens import Doc, Span
@@ -97,23 +98,35 @@ class PlaintextReader(BaseCorpusReader):
                     yield doc[:]
 
 
-class LatinLibraryReader(PlaintextReader):
+class LatinLibraryReader(DownloadableCorpusMixin, PlaintextReader):
     """Reader for The Latin Library corpus.
 
     The Latin Library (https://www.thelatinlibrary.com/) is a collection
     of Latin texts in plain text format. This reader handles the standard
     structure of Latin Library files.
 
-    If no root is provided, attempts to use the CLTK-downloaded corpus.
+    If no root path is provided, looks for the corpus in:
+    1. The path specified by LATIN_LIBRARY_PATH environment variable
+    2. ~/latincy_data/lat_text_latin_library
+
+    If the corpus is not found and auto_download=True (default), offers to
+    download from GitHub.
 
     Example:
-        >>> reader = LatinLibraryReader()  # Uses CLTK default location
+        >>> reader = LatinLibraryReader()  # Uses default location or downloads
+        >>> reader = LatinLibraryReader("/custom/path/to/corpus")
         >>> for doc in reader.docs():
         ...     print(f"{doc._.fileid}: {len(list(doc.sents))} sentences")
+
+    Attributes:
+        CORPUS_URL: GitHub URL for downloading the corpus.
+        ENV_VAR: Environment variable for custom corpus path.
     """
 
-    # Default CLTK corpus location
-    CLTK_CORPUS_NAME = "lat_text_latin_library"
+    CORPUS_URL = "https://github.com/cltk/lat_text_latin_library.git"
+    ENV_VAR = "LATIN_LIBRARY_PATH"
+    DEFAULT_SUBDIR = "lat_text_latin_library"
+    _FILE_CHECK_PATTERN = "**/*.txt"
 
     def __init__(
         self,
@@ -121,16 +134,20 @@ class LatinLibraryReader(PlaintextReader):
         fileids: str | None = None,
         encoding: str = "utf-8",
         annotation_level: AnnotationLevel = AnnotationLevel.BASIC,
-        auto_download: bool = False,
+        auto_download: bool = True,
+        cache: bool = True,
+        cache_maxsize: int = 128,
     ):
         """Initialize the Latin Library reader.
 
         Args:
-            root: Root directory. If None, uses CLTK default location.
+            root: Root directory. If None, uses default location.
             fileids: Glob pattern for selecting files.
             encoding: Text encoding.
             annotation_level: NLP annotation level.
-            auto_download: If True and corpus not found, download via CLTK.
+            auto_download: If True and corpus not found, offer to download.
+            cache: If True (default), cache processed Doc objects for reuse.
+            cache_maxsize: Maximum number of documents to cache (default 128).
         """
         if root is None:
             root = self._get_default_root(auto_download)
@@ -140,45 +157,8 @@ class LatinLibraryReader(PlaintextReader):
             fileids=fileids,
             encoding=encoding,
             annotation_level=annotation_level,
-        )
-
-    def _get_default_root(self, auto_download: bool = False) -> Path:
-        """Get the default CLTK corpus location.
-
-        Args:
-            auto_download: If True, download corpus if not present.
-
-        Returns:
-            Path to corpus root.
-
-        Raises:
-            FileNotFoundError: If corpus not found and auto_download=False.
-        """
-        from pathlib import Path
-        import os
-
-        # Standard CLTK data location
-        cltk_data = Path(os.path.expanduser("~/cltk_data"))
-        corpus_path = cltk_data / "lat" / "text" / self.CLTK_CORPUS_NAME
-
-        if corpus_path.exists():
-            return corpus_path
-
-        if auto_download:
-            try:
-                from cltk.data.fetch import FetchCorpus
-                fetcher = FetchCorpus(language="lat")
-                fetcher.import_corpus(self.CLTK_CORPUS_NAME)
-                return corpus_path
-            except ImportError:
-                raise ImportError(
-                    "CLTK is required for auto-download. "
-                    "Install with: pip install cltk"
-                )
-
-        raise FileNotFoundError(
-            f"Latin Library corpus not found at {corpus_path}. "
-            f"Either provide a root path or set auto_download=True."
+            cache=cache,
+            cache_maxsize=cache_maxsize,
         )
 
     def _parse_file(self, path: Path) -> Iterator[tuple[str, dict]]:
