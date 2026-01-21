@@ -182,22 +182,23 @@ reader.clear_cache()
 
 ### Annotation Levels
 
-Control NLP processing overhead:
+All linguistic annotations are provided by [LatinCy](https://github.com/diyclassics/latincy) spaCy-based pipelines. The full pipeline provides POS tagging, lemmatization, morphological analysis, and named entity recognition—but this can be slow for large corpora. If you don't need all annotations, you can get significant performance gains by selecting a lighter annotation level:
 
 ```python
 from latincyreaders import AnnotationLevel
 
-# No NLP - fastest, returns raw strings
-reader.texts()
+# Full pipeline: POS, lemma, morphology, NER (default)
+reader = TesseraeReader(annotation_level=AnnotationLevel.FULL)
 
-# Tokenization only
-reader = TesseraeReader(annotation_level=AnnotationLevel.TOKENIZE)
-
-# Basic: tokenization + sentence boundaries (default)
+# Basic: tokenization + sentence boundaries only
 reader = TesseraeReader(annotation_level=AnnotationLevel.BASIC)
 
-# Full pipeline: POS, lemma, morphology, NER
-reader = TesseraeReader(annotation_level=AnnotationLevel.FULL)
+# Tokenization only (no sentence boundaries)
+reader = TesseraeReader(annotation_level=AnnotationLevel.TOKENIZE)
+
+# No NLP at all - use texts() for raw strings
+for text in reader.texts():
+    print(text)
 ```
 
 ### Metadata Management
@@ -255,4 +256,4 @@ python cli/lemma_search.py --lemmas bellum pax --fileids "cicero.*"
 
 ---
 
-*Developed by [Patrick J. Burns](http://github.com/diyclassics)*
+*Developed by [Patrick J. Burns](http://github.com/diyclassics)with Claude Opus 4.5. in January 2026.*  

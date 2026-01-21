@@ -133,7 +133,7 @@ class LatinLibraryReader(DownloadableCorpusMixin, PlaintextReader):
         root: str | Path | None = None,
         fileids: str | None = None,
         encoding: str = "utf-8",
-        annotation_level: AnnotationLevel = AnnotationLevel.BASIC,
+        annotation_level: AnnotationLevel = AnnotationLevel.FULL,
         auto_download: bool = True,
         cache: bool = True,
         cache_maxsize: int = 128,

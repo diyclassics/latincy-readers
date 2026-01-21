@@ -66,7 +66,7 @@ class CamenaCorpusReader(DownloadableCorpusMixin, TEIReader):
         root: str | Path | None = None,
         fileids: str | None = None,
         encoding: str = "utf-8",
-        annotation_level: AnnotationLevel = AnnotationLevel.BASIC,
+        annotation_level: AnnotationLevel = AnnotationLevel.FULL,
         include_front: bool = True,
         remove_notes: bool = True,
         auto_download: bool = True,
@@ -306,7 +306,8 @@ class CamenaCorpusReader(DownloadableCorpusMixin, TEIReader):
         Yields:
             spaCy Doc objects from the specified collection.
         """
-        pattern = f"*{collection}*"
+        # Use regex pattern (fileids match uses re.compile)
+        pattern = f".*{collection}.*"
         matching = self.fileids(match=pattern)
         yield from self.docs(matching)
 

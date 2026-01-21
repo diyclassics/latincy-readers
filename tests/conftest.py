@@ -32,3 +32,15 @@ def tei_dir(fixtures_dir) -> Path:
 def sample_tei_file(tei_dir) -> Path:
     """Path to sample TEI XML file."""
     return tei_dir / "sample.xml"
+
+
+@pytest.fixture
+def camena_dir(fixtures_dir) -> Path:
+    """Path to CAMENA test fixtures."""
+    return fixtures_dir / "camena"
+
+
+@pytest.fixture
+def txtdown_dir(fixtures_dir) -> Path:
+    """Path to txtdown test fixtures."""
+    return fixtures_dir / "txtdown"

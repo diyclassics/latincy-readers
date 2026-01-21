@@ -53,7 +53,7 @@ class BaseCorpusReader(ABC):
         root: str | Path,
         fileids: str | None = None,
         encoding: str = "utf-8",
-        annotation_level: AnnotationLevel = AnnotationLevel.BASIC,
+        annotation_level: AnnotationLevel = AnnotationLevel.FULL,
         metadata_pattern: str = "metadata/*.json",
         cache: bool = True,
         cache_maxsize: int = 128,

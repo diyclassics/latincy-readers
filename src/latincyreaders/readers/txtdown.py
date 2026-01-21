@@ -46,7 +46,7 @@ class TxtdownReader(BaseCorpusReader):
         root: str | Path,
         fileids: str | None = None,
         encoding: str = "utf-8",
-        annotation_level: AnnotationLevel = AnnotationLevel.BASIC,
+        annotation_level: AnnotationLevel = AnnotationLevel.FULL,
         cache: bool = True,
         cache_maxsize: int = 128,
     ):
@@ -138,8 +138,7 @@ class TxtdownReader(BaseCorpusReader):
         Yields:
             spaCy Doc objects.
         """
-        level = annotation_level or self._annotation_level
-        nlp = self._get_nlp(level)
+        nlp = self.nlp
 
         if nlp is None:
             raise ValueError(

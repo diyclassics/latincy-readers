@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TEI>
+  <teiHeader>
+    <fileDesc>
+      <titleStmt>
+        <title>Carmina (Sample)</title>
+        <author>Johannes Secundus</author>
+      </titleStmt>
+    </fileDesc>
+  </teiHeader>
+  <text>
+    <front>
+      <div type="dedication">
+        <p>Ad Lectorem: Haec carmina tibi dono.</p>
+      </div>
+    </front>
+    <body>
+      <div type="poem" n="1">
+        <head>Carmen I</head>
+        <lg>
+          <l>Basia mille dedit mihi Lesbia,</l>
+          <l>Basia mille iterum dedit illa,</l>
+          <l>Nec numerare potest quisquam tot basia.</l>
+        </lg>
+        <lg>
+          <l>Da mihi basia mille, deinde centum,</l>
+          <l>Dein mille altera, dein secunda centum.</l>
+        </lg>
+      </div>
+      <div type="poem" n="2">
+        <head>Carmen II</head>
+        <p>Hoc carmen prosa scriptum est, non versibus. Amor vincit omnia, et nos cedamus amori.</p>
+        <note>This note should be removed by default.</note>
+      </div>
+    </body>
+  </text>
+</TEI>

@@ -147,10 +147,23 @@ class TestCacheMaxSize:
 
     def test_cache_evicts_oldest(self, reader_small_cache):
         """Cache evicts oldest entries when full."""
-        # This test would need multiple files to work properly
-        # For now, just verify maxsize is respected
-        stats = reader_small_cache.cache_stats()
-        assert "maxsize" in stats
+        fileids = reader_small_cache.fileids()
+        assert len(fileids) >= 3, "Need 3 test files for eviction test"
+
+        # Access first two files - cache size is 2
+        _ = next(reader_small_cache.docs(fileids[0]))
+        _ = next(reader_small_cache.docs(fileids[1]))
+        assert reader_small_cache.cache_stats()["size"] == 2
+
+        # Access third file - should evict first
+        _ = next(reader_small_cache.docs(fileids[2]))
+        assert reader_small_cache.cache_stats()["size"] == 2  # Still at max
+
+        # First file should be evicted, accessing it should be a miss
+        misses_before = reader_small_cache.cache_stats()["misses"]
+        _ = next(reader_small_cache.docs(fileids[0]))
+        misses_after = reader_small_cache.cache_stats()["misses"]
+        assert misses_after > misses_before  # Re-loaded from disk
 
 
 class TestCacheIntegration:
