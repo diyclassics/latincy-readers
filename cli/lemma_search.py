@@ -54,8 +54,8 @@ Examples:
     parser.add_argument(
         "--root", "-r",
         type=Path,
-        default=Path.home() / "cltk_data/lat/text/lat_text_tesserae",
-        help="Root directory of Tesserae corpus",
+        default=None,
+        help="Root directory of Tesserae corpus (default: auto-detect or download)",
     )
     parser.add_argument(
         "--fileids",

@@ -1,6 +1,6 @@
 # LatinCy Readers
 
-Corpus readers for Latin texts with [LatinCy](https://github.com/diyclassics/latincy)/spaCy integration.
+Corpus readers for Latin texts with [LatinCy](https://github.com/diyclassics/latincy) integration.
 
 Version 1.0.0; Python 3.10+; LatinCy 3.8.0+
 
@@ -256,4 +256,4 @@ python cli/lemma_search.py --lemmas bellum pax --fileids "cicero.*"
 
 ---
 
-*Developed by [Patrick J. Burns](http://github.com/diyclassics)with Claude Opus 4.5. in January 2026.*  
+*Developed by [Patrick J. Burns](http://github.com/diyclassics) with Claude Opus 4.5. in January 2026.*  
