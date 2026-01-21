@@ -9,7 +9,9 @@ followed by text:
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator, TYPE_CHECKING
@@ -39,22 +41,141 @@ class TesseraeReader(BaseCorpusReader):
     This reader preserves citation information through the NLP pipeline by
     storing it in spaCy custom extensions.
 
+    If no root path is provided, looks for the corpus in:
+    1. The path specified by TESSERAE_PATH environment variable
+    2. ~/latincy_data/lat_text_tesserae/texts
+
+    If the corpus is not found and auto_download=True (default), offers to
+    download from GitHub.
+
     Example:
-        >>> reader = TesseraeReader("/path/to/corpus")
+        >>> reader = TesseraeReader()  # Uses default location or downloads
+        >>> reader = TesseraeReader("/custom/path/to/corpus")
         >>> for doc in reader.docs():
         ...     for line in doc.spans["lines"]:
         ...         print(f"{line._.citation}: {line.text[:50]}...")
 
     Attributes:
         CITATION_PATTERN: Regex for parsing citation-text pairs.
+        CORPUS_URL: GitHub URL for downloading the corpus.
+        ENV_VAR: Environment variable for custom corpus path.
     """
 
     CITATION_PATTERN = re.compile(r"<([^>]+)>\s*(.+)")
+    CORPUS_URL = "https://github.com/cltk/lat_text_tesserae.git"
+    ENV_VAR = "TESSERAE_PATH"
+
+    def __init__(
+        self,
+        root: str | Path | None = None,
+        fileids: str | None = None,
+        encoding: str = "utf-8",
+        annotation_level: AnnotationLevel = AnnotationLevel.BASIC,
+        auto_download: bool = True,
+    ):
+        """Initialize the Tesserae reader.
+
+        Args:
+            root: Root directory containing .tess files. If None, uses default location.
+            fileids: Glob pattern for selecting files.
+            encoding: Text encoding.
+            annotation_level: How much NLP annotation to apply.
+            auto_download: If True and corpus not found, offer to download.
+        """
+        if root is None:
+            root = self._get_default_root(auto_download)
+        super().__init__(root, fileids, encoding, annotation_level)
+
+    @classmethod
+    def default_root(cls) -> Path:
+        """Return the default corpus location.
+
+        Checks in order:
+        1. TESSERAE_PATH environment variable
+        2. ~/latincy_data/tesserae
+
+        Returns:
+            Path to the default corpus location.
+        """
+        if env_path := os.environ.get(cls.ENV_VAR):
+            return Path(env_path)
+        return Path.home() / "latincy_data" / "lat_text_tesserae" / "texts"
+
+    @classmethod
+    def _get_default_root(cls, auto_download: bool = True) -> Path:
+        """Get the corpus root, downloading if necessary.
+
+        Args:
+            auto_download: If True and corpus not found, offer to download.
+
+        Returns:
+            Path to the corpus.
+
+        Raises:
+            FileNotFoundError: If corpus not found and auto_download is False.
+        """
+        root = cls.default_root()
+
+        if root.exists() and any(root.glob("**/*.tess")):
+            return root
+
+        if not auto_download:
+            raise FileNotFoundError(
+                f"Tesserae corpus not found at {root}. "
+                f"Set {cls.ENV_VAR} environment variable or pass root= explicitly. "
+                f"Or set auto_download=True to download automatically."
+            )
+
+        # Prompt for download
+        print(f"Tesserae corpus not found at {root}")
+        response = input("Download from GitHub? [y/N]: ").strip().lower()
+
+        if response in ("y", "yes"):
+            cls.download(root)
+            return root
+        else:
+            raise FileNotFoundError(
+                f"Tesserae corpus not found at {root}. "
+                f"Download manually from {cls.CORPUS_URL}"
+            )
+
+    @classmethod
+    def download(cls, destination: Path | None = None) -> Path:
+        """Download the Tesserae corpus from GitHub.
+
+        Args:
+            destination: Where to clone the corpus. Defaults to default_root().
+
+        Returns:
+            Path to the downloaded corpus.
+        """
+        if destination is None:
+            destination = cls.default_root()
+
+        destination = Path(destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+
+        print(f"Cloning Tesserae corpus to {destination}...")
+        try:
+            subprocess.run(
+                ["git", "clone", "--depth", "1", cls.CORPUS_URL, str(destination)],
+                check=True,
+            )
+            print(f"Successfully downloaded to {destination}")
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"Failed to clone repository: {e}") from e
+        except FileNotFoundError:
+            raise RuntimeError(
+                "git not found. Please install git or download manually from "
+                f"{cls.CORPUS_URL}"
+            )
+
+        return destination
 
     @classmethod
     def _default_file_pattern(cls) -> str:
         """Tesserae files use .tess extension."""
-        return "**/*.tess"
+        return "*.tess"
 
     def _parse_lines(self, text: str) -> Iterator[TesseraeLine]:
         """Parse citation-text pairs from Tesserae format.
@@ -137,6 +258,7 @@ class TesseraeReader(BaseCorpusReader):
         """Yield spaCy Docs with citation spans.
 
         Each Doc has a "lines" span group containing citation-annotated spans.
+        Metadata from JSON files is merged with file-level metadata.
 
         Args:
             fileids: Files to process, or None for all.
@@ -152,14 +274,20 @@ class TesseraeReader(BaseCorpusReader):
             )
 
         for path in self._iter_paths(fileids):
-            for text, metadata in self._parse_file(path):
+            fileid = str(path.relative_to(self._root))
+            # Get JSON metadata
+            json_metadata = self.get_metadata(fileid)
+
+            for text, file_metadata in self._parse_file(path):
                 text = self._normalize_text(text)
                 doc = nlp(text)
-                doc._.fileid = str(path.relative_to(self._root))
-                doc._.metadata = {k: v for k, v in metadata.items() if not k.startswith("_")}
+                doc._.fileid = fileid
+                # Merge: JSON metadata as base, file metadata overrides (excluding private keys)
+                clean_file_meta = {k: v for k, v in file_metadata.items() if not k.startswith("_")}
+                doc._.metadata = {**json_metadata, **clean_file_meta}
 
                 # Create citation spans
-                lines_data = metadata.get("_lines", [])
+                lines_data = file_metadata.get("_lines", [])
                 doc.spans["lines"] = self._make_line_spans(doc, lines_data)
 
                 yield doc
@@ -321,6 +449,7 @@ class TesseraeReader(BaseCorpusReader):
         pattern: str | None = None,
         forms: list[str] | None = None,
         lemma: str | None = None,
+        matcher_pattern: list[dict] | None = None,
         fileids: str | list[str] | None = None,
         ignore_case: bool = True,
         context: bool = False,
@@ -333,6 +462,8 @@ class TesseraeReader(BaseCorpusReader):
             pattern: Regex pattern to match.
             forms: List of exact word forms to match.
             lemma: Lemma to match (requires NLP - slower but handles all forms).
+            matcher_pattern: spaCy Matcher pattern for advanced queries.
+                A list of token patterns, e.g. [{"POS": "ADJ"}, {"POS": "NOUN"}].
             fileids: Files to search, or None for all.
             ignore_case: Whether to ignore case (default True for pattern/forms).
             context: If True, include surrounding sentences.
@@ -352,8 +483,15 @@ class TesseraeReader(BaseCorpusReader):
             >>> # Slower but complete: by lemma
             >>> for hit in reader.find_sents(lemma="Caesar"):
             ...     print(hit['sentence'])
+
+            >>> # spaCy Matcher pattern: ADJ + NOUN combinations
+            >>> for hit in reader.find_sents(matcher_pattern=[{"POS": "ADJ"}, {"POS": "NOUN"}]):
+            ...     print(f"{hit['citation']}: {hit['matches']}")
         """
-        if lemma is not None:
+        if matcher_pattern is not None:
+            # Matcher-based search (requires NLP)
+            yield from self._find_sents_by_matcher(matcher_pattern, fileids, context)
+        elif lemma is not None:
             # Lemma search requires NLP
             yield from self._find_sents_by_lemma(lemma, fileids, context)
         else:
@@ -420,6 +558,63 @@ class TesseraeReader(BaseCorpusReader):
                         result["prev_sent"] = sents[i - 1].text if i > 0 else None
                         result["next_sent"] = sents[i + 1].text if i < len(sents) - 1 else None
                     yield result
+
+    def _find_sents_by_matcher(
+        self,
+        matcher_pattern: list[dict],
+        fileids: str | list[str] | None,
+        context: bool,
+    ) -> Iterator[dict]:
+        """Find sentences using spaCy Matcher patterns.
+
+        Args:
+            matcher_pattern: List of token patterns for spaCy Matcher.
+            fileids: Files to search.
+            context: Include surrounding sentences.
+
+        Yields:
+            Result dicts with matched spans.
+        """
+        from spacy.matcher import Matcher
+
+        nlp = self.nlp
+        if nlp is None:
+            raise ValueError("Matcher patterns require NLP. Set annotation_level > NONE.")
+
+        # Create and configure matcher
+        matcher = Matcher(nlp.vocab)
+        matcher.add("PATTERN", [matcher_pattern])
+
+        for doc in self.docs(fileids):
+            sents = list(doc.sents)
+            matches = matcher(doc)
+
+            # Group matches by sentence
+            sent_matches: dict[int, list[str]] = {}
+            for match_id, start, end in matches:
+                matched_span = doc[start:end]
+                # Find which sentence this match belongs to
+                for sent_idx, sent in enumerate(sents):
+                    if start >= sent.start and end <= sent.end:
+                        if sent_idx not in sent_matches:
+                            sent_matches[sent_idx] = []
+                        sent_matches[sent_idx].append(matched_span.text)
+                        break
+
+            # Yield results for sentences with matches
+            for sent_idx, matched_texts in sent_matches.items():
+                sent = sents[sent_idx]
+                result = {
+                    "fileid": doc._.fileid,
+                    "citation": self._get_citation_for_span(doc, sent),
+                    "sentence": sent.text,
+                    "matches": matched_texts,
+                    "pattern": matcher_pattern,
+                }
+                if context:
+                    result["prev_sent"] = sents[sent_idx - 1].text if sent_idx > 0 else None
+                    result["next_sent"] = sents[sent_idx + 1].text if sent_idx < len(sents) - 1 else None
+                yield result
 
     def _get_citation_for_span(self, doc: "Doc", span: "Span") -> str | None:
         """Get the citation for a span by finding the overlapping line span."""

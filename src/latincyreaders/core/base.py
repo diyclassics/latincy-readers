@@ -7,11 +7,12 @@ and the standard iteration interface.
 
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Iterator, TYPE_CHECKING
+from typing import Any, Iterator, TYPE_CHECKING
 
 from latincyreaders.nlp.pipeline import AnnotationLevel, get_nlp
 
@@ -51,6 +52,7 @@ class BaseCorpusReader(ABC):
         fileids: str | None = None,
         encoding: str = "utf-8",
         annotation_level: AnnotationLevel = AnnotationLevel.BASIC,
+        metadata_pattern: str = "metadata/*.json",
     ):
         """Initialize the corpus reader.
 
@@ -59,12 +61,15 @@ class BaseCorpusReader(ABC):
             fileids: Glob pattern for selecting files. If None, uses class default.
             encoding: Text encoding for reading files.
             annotation_level: How much NLP annotation to apply.
+            metadata_pattern: Glob pattern for metadata JSON files. Set to None to disable.
         """
         self._root = Path(root).resolve()
         self._fileids_pattern = fileids or self._default_file_pattern()
         self._encoding = encoding
         self._annotation_level = annotation_level
         self._nlp: Language | None = None  # Lazy loaded
+        self._metadata_pattern = metadata_pattern
+        self._metadata: dict[str, dict[str, Any]] | None = None  # Lazy loaded
 
     @property
     def root(self) -> Path:
@@ -82,6 +87,61 @@ class BaseCorpusReader(ABC):
     def annotation_level(self) -> AnnotationLevel:
         """Current annotation level."""
         return self._annotation_level
+
+    def _load_metadata(self) -> dict[str, dict[str, Any]]:
+        """Load and aggregate metadata from JSON files.
+
+        Searches for JSON files matching metadata_pattern and merges them
+        by fileid key. Later files override earlier ones for duplicate keys.
+
+        Returns:
+            Dict mapping fileid -> metadata dict.
+        """
+        if self._metadata_pattern is None:
+            return {}
+
+        merged: dict[str, dict[str, Any]] = {}
+
+        for json_file in sorted(self._root.glob(self._metadata_pattern)):
+            try:
+                data = json.loads(json_file.read_text(encoding=self._encoding))
+                if isinstance(data, dict):
+                    for fileid, meta in data.items():
+                        if isinstance(meta, dict):
+                            merged.setdefault(fileid, {}).update(meta)
+            except (json.JSONDecodeError, OSError):
+                # Skip malformed or unreadable files
+                continue
+
+        return merged
+
+    def get_metadata(self, fileid: str) -> dict[str, Any]:
+        """Get metadata for a specific file.
+
+        Args:
+            fileid: File identifier.
+
+        Returns:
+            Metadata dict for the file, or empty dict if not found.
+        """
+        if self._metadata is None:
+            self._metadata = self._load_metadata()
+        return self._metadata.get(fileid, {})
+
+    def metadata(
+        self,
+        fileids: str | list[str] | None = None,
+    ) -> Iterator[tuple[str, dict[str, Any]]]:
+        """Yield (fileid, metadata) pairs.
+
+        Args:
+            fileids: Files to get metadata for, or None for all.
+
+        Yields:
+            Tuples of (fileid, metadata_dict).
+        """
+        for fileid in self._resolve_fileids(fileids):
+            yield fileid, self.get_metadata(fileid)
 
     @classmethod
     def _default_file_pattern(cls) -> str:
@@ -106,10 +166,12 @@ class BaseCorpusReader(ABC):
             match: Optional regex pattern to filter filenames.
 
         Returns:
-            Sorted list of matching file identifiers (relative paths).
+            Naturally sorted list of matching file identifiers (relative paths).
         """
+        from natsort import natsorted
+
         pattern = self._fileids_pattern
-        files = sorted(self._root.glob(pattern))
+        files = self._root.glob(pattern)
 
         # Convert to relative paths as strings
         result = [str(f.relative_to(self._root)) for f in files if f.is_file()]
@@ -119,7 +181,8 @@ class BaseCorpusReader(ABC):
             regex = re.compile(match, re.IGNORECASE)
             result = [f for f in result if regex.search(f)]
 
-        return result
+        # Natural sort (handles numbers correctly: part.1, part.2, ..., part.10)
+        return natsorted(result)
 
     def _resolve_fileids(self, fileids: str | list[str] | None) -> list[str]:
         """Resolve fileids argument to a list of file identifiers.
@@ -187,6 +250,7 @@ class BaseCorpusReader(ABC):
         """Yield spaCy Doc objects with annotations.
 
         The level of annotation depends on the reader's annotation_level setting.
+        Metadata from JSON files is merged with any metadata from _parse_file().
 
         Args:
             fileids: Files to process, or None for all.
@@ -202,11 +266,16 @@ class BaseCorpusReader(ABC):
             )
 
         for path in self._iter_paths(fileids):
-            for text, metadata in self._parse_file(path):
+            fileid = str(path.relative_to(self._root))
+            # Get JSON metadata and merge with file-level metadata
+            json_metadata = self.get_metadata(fileid)
+
+            for text, file_metadata in self._parse_file(path):
                 text = self._normalize_text(text)
                 doc = nlp(text)
-                doc._.fileid = str(path.relative_to(self._root))
-                doc._.metadata = metadata
+                doc._.fileid = fileid
+                # Merge: JSON metadata as base, file metadata overrides
+                doc._.metadata = {**json_metadata, **file_metadata}
                 yield doc
 
     def sents(

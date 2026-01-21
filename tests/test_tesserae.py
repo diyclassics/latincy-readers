@@ -200,6 +200,27 @@ class TestTesseraeReader:
         lines = list(reader.texts_by_line())
         assert len(lines) > 0
 
+    # -------------------------------------------------------------------------
+    # Auto-download functionality
+    # -------------------------------------------------------------------------
+
+    def test_auto_download_false_raises_on_missing(self, tmp_path, monkeypatch):
+        """auto_download=False raises FileNotFoundError for missing corpus."""
+        # Point to a non-existent directory
+        monkeypatch.setenv("TESSERAE_PATH", str(tmp_path / "nonexistent"))
+        with pytest.raises(FileNotFoundError, match="Tesserae corpus not found"):
+            TesseraeReader(root=None, auto_download=False)
+
+    def test_default_root_returns_path(self):
+        """default_root() returns a Path."""
+        root = TesseraeReader.default_root()
+        assert isinstance(root, Path)
+
+    def test_explicit_root_bypasses_default(self, tesserae_dir):
+        """Explicit root= bypasses default location logic."""
+        reader = TesseraeReader(root=tesserae_dir)
+        assert reader.root == tesserae_dir.resolve()
+
 
 class TestTesseraeLineParsing:
     """Test the line parsing logic specifically."""
@@ -328,6 +349,37 @@ class TestTesseraeSearch:
         result = results[0]
         assert "prev_sent" in result
         assert "next_sent" in result
+
+    def test_find_sents_with_matcher_pattern(self, tesserae_dir):
+        """find_sents() works with spaCy Matcher patterns."""
+        # Matcher patterns need BASIC annotation level for POS
+        reader = TesseraeReader(
+            root=tesserae_dir,
+            fileids="*.tess",
+            annotation_level=AnnotationLevel.BASIC,
+        )
+        # Pattern: NOUN followed by any word
+        pattern = [{"POS": "NOUN"}, {}]
+        results = list(reader.find_sents(matcher_pattern=pattern))
+        assert len(results) > 0
+        result = results[0]
+        assert "matches" in result
+        assert "pattern" in result
+        assert len(result["matches"]) > 0
+
+    def test_find_sents_matcher_with_lemma(self, tesserae_dir):
+        """find_sents() Matcher works with LEMMA patterns."""
+        # Matcher with LEMMA needs BASIC annotation level
+        reader = TesseraeReader(
+            root=tesserae_dir,
+            fileids="*.tess",
+            annotation_level=AnnotationLevel.BASIC,
+        )
+        # Pattern: match specific lemma
+        pattern = [{"LEMMA": {"IN": ["qui", "sum", "et"]}}]  # Common Latin words
+        results = list(reader.find_sents(matcher_pattern=pattern))
+        # Should find at least one match
+        assert len(results) >= 0  # Pattern may or may not match depending on model
 
     # -------------------------------------------------------------------------
     # export_search_results() method

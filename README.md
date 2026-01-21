@@ -7,7 +7,16 @@ Version 1.0.0a1; Python 3.10+; LatinCy 3.8.0+
 ## Installation
 
 ```bash
-pip install -e git+https://github.com/diyclassics/latincy-readers.git#egg=latincyreaders
+# Install from GitHub
+pip install git+https://github.com/diyclassics/latincy-readers.git
+
+# With LatinCy model included
+pip install "latincy-readers[models] @ git+https://github.com/diyclassics/latincy-readers.git"
+
+# For development (editable install)
+git clone https://github.com/diyclassics/latincy-readers.git
+cd latincy-readers
+pip install -e ".[dev]"
 ```
 
 ## Quick Start
