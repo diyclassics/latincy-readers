@@ -15,6 +15,8 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Iterator, TYPE_CHECKING
 
+from tqdm import tqdm
+
 from latincyreaders.nlp.pipeline import AnnotationLevel, get_nlp
 
 if TYPE_CHECKING:
@@ -767,6 +769,7 @@ class BaseCorpusReader(ABC):
         fileids: str | list[str] | None = None,
         ignore_case: bool = True,
         context: bool = False,
+        show_progress: bool = False,
     ) -> Iterator[dict]:
         """Find sentences containing specific words/patterns/lemmas.
 
@@ -780,6 +783,7 @@ class BaseCorpusReader(ABC):
             fileids: Files to search, or None for all.
             ignore_case: Whether to ignore case (default True for pattern/forms).
             context: If True, include surrounding sentences.
+            show_progress: If True, show tqdm progress bar for file iteration.
 
         Yields:
             Dicts with keys: fileid, citation, sentence, matches, (prev_sent, next_sent).
@@ -792,12 +796,18 @@ class BaseCorpusReader(ABC):
             ...     print(hit['sentence'])
         """
         if matcher_pattern is not None:
-            yield from self._find_sents_by_matcher(matcher_pattern, fileids, context)
+            yield from self._find_sents_by_matcher(matcher_pattern, fileids, context, show_progress)
         elif lemma is not None:
             lemmas = [lemma] if isinstance(lemma, str) else lemma
-            yield from self._find_sents_by_lemma(lemmas, fileids, context)
+            yield from self._find_sents_by_lemma(lemmas, fileids, context, show_progress)
         else:
-            yield from self._find_sents_by_pattern(pattern, forms, fileids, ignore_case, context)
+            yield from self._find_sents_by_pattern(pattern, forms, fileids, ignore_case, context, show_progress)
+
+    @staticmethod
+    def _normalize_sent_text(text: str) -> str:
+        """Normalize sentence text by replacing newlines with spaces."""
+        # Replace \r\n, \r, \n with space, then collapse multiple spaces
+        return " ".join(text.split())
 
     def _find_sents_by_pattern(
         self,
@@ -806,6 +816,7 @@ class BaseCorpusReader(ABC):
         fileids: str | list[str] | None,
         ignore_case: bool,
         context: bool,
+        show_progress: bool = False,
     ) -> Iterator[dict]:
         """Find sentences by regex pattern (fast path)."""
         if pattern is None and forms is None:
@@ -818,7 +829,14 @@ class BaseCorpusReader(ABC):
         flags = re.IGNORECASE if ignore_case else 0
         regex = re.compile(pattern, flags)
 
-        for doc in self.docs(fileids):
+        # Get fileids list for progress bar
+        if show_progress:
+            fids = self._resolve_fileids(fileids)
+            doc_iter = tqdm(self.docs(fids), total=len(fids), desc="Files", unit="file")
+        else:
+            doc_iter = self.docs(fileids)
+
+        for doc in doc_iter:
             sents = list(doc.sents)
             for i, sent in enumerate(sents):
                 matches = regex.findall(sent.text)
@@ -826,12 +844,12 @@ class BaseCorpusReader(ABC):
                     result = {
                         "fileid": doc._.fileid,
                         "citation": self._get_citation_for_span(doc, sent),
-                        "sentence": sent.text,
+                        "sentence": self._normalize_sent_text(sent.text),
                         "matches": matches,
                     }
                     if context:
-                        result["prev_sent"] = sents[i - 1].text if i > 0 else None
-                        result["next_sent"] = sents[i + 1].text if i < len(sents) - 1 else None
+                        result["prev_sent"] = self._normalize_sent_text(sents[i - 1].text) if i > 0 else None
+                        result["next_sent"] = self._normalize_sent_text(sents[i + 1].text) if i < len(sents) - 1 else None
                     yield result
 
     def _find_sents_by_lemma(
@@ -839,11 +857,19 @@ class BaseCorpusReader(ABC):
         lemmas: list[str],
         fileids: str | list[str] | None,
         context: bool,
+        show_progress: bool = False,
     ) -> Iterator[dict]:
         """Find sentences by lemma(s) (uses NLP)."""
         target_lemmas = {lem.lower() for lem in lemmas}
 
-        for doc in self.docs(fileids):
+        # Get fileids list for progress bar
+        if show_progress:
+            fids = self._resolve_fileids(fileids)
+            doc_iter = tqdm(self.docs(fids), total=len(fids), desc="Files", unit="file")
+        else:
+            doc_iter = self.docs(fileids)
+
+        for doc in doc_iter:
             sents = list(doc.sents)
             for i, sent in enumerate(sents):
                 matches = [t.text for t in sent if t.lemma_.lower() in target_lemmas]
@@ -854,13 +880,13 @@ class BaseCorpusReader(ABC):
                     result = {
                         "fileid": doc._.fileid,
                         "citation": self._get_citation_for_span(doc, sent),
-                        "sentence": sent.text,
+                        "sentence": self._normalize_sent_text(sent.text),
                         "matches": matches,
                         "lemmas": list(set(matched_lemmas)),
                     }
                     if context:
-                        result["prev_sent"] = sents[i - 1].text if i > 0 else None
-                        result["next_sent"] = sents[i + 1].text if i < len(sents) - 1 else None
+                        result["prev_sent"] = self._normalize_sent_text(sents[i - 1].text) if i > 0 else None
+                        result["next_sent"] = self._normalize_sent_text(sents[i + 1].text) if i < len(sents) - 1 else None
                     yield result
 
     def _find_sents_by_matcher(
@@ -868,6 +894,7 @@ class BaseCorpusReader(ABC):
         matcher_pattern: list[dict],
         fileids: str | list[str] | None,
         context: bool,
+        show_progress: bool = False,
     ) -> Iterator[dict]:
         """Find sentences using spaCy Matcher patterns."""
         from spacy.matcher import Matcher
@@ -879,7 +906,14 @@ class BaseCorpusReader(ABC):
         matcher = Matcher(nlp.vocab)
         matcher.add("PATTERN", [matcher_pattern])
 
-        for doc in self.docs(fileids):
+        # Get fileids list for progress bar
+        if show_progress:
+            fids = self._resolve_fileids(fileids)
+            doc_iter = tqdm(self.docs(fids), total=len(fids), desc="Files", unit="file")
+        else:
+            doc_iter = self.docs(fileids)
+
+        for doc in doc_iter:
             sents = list(doc.sents)
             matches = matcher(doc)
 
@@ -898,10 +932,10 @@ class BaseCorpusReader(ABC):
                 result = {
                     "fileid": doc._.fileid,
                     "citation": self._get_citation_for_span(doc, sent),
-                    "sentence": sent.text,
+                    "sentence": self._normalize_sent_text(sent.text),
                     "matches": match_texts,
                 }
                 if context:
-                    result["prev_sent"] = sents[i - 1].text if i > 0 else None
-                    result["next_sent"] = sents[i + 1].text if i < len(sents) - 1 else None
+                    result["prev_sent"] = self._normalize_sent_text(sents[i - 1].text) if i > 0 else None
+                    result["next_sent"] = self._normalize_sent_text(sents[i + 1].text) if i < len(sents) - 1 else None
                 yield result

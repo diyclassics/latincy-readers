@@ -11,6 +11,7 @@ Example usage:
     python reader_search.py --forms Thebas Thebarum --limit 100
     python reader_search.py --pattern "\\bTheb\\w+" --no-save
 """
+
 from __future__ import annotations
 
 import argparse
@@ -21,9 +22,8 @@ from itertools import islice
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from tqdm import tqdm
-
 from latincyreaders import TesseraeReader, LatinLibraryReader, CamenaReader
+from latincyreaders.nlp.pipeline import AnnotationLevel
 
 # Output directory relative to this script
 CLI_OUTPUT_DIR = Path(__file__).parent / "cli_output"
@@ -55,17 +55,20 @@ Examples:
     # Search parameters (mutually exclusive group)
     search_group = parser.add_mutually_exclusive_group(required=True)
     search_group.add_argument(
-        "--lemmas", "-l",
+        "--lemmas",
+        "-l",
         nargs="+",
         help="Lemma(s) to search for (slower, but finds all inflected forms)",
     )
     search_group.add_argument(
-        "--forms", "-f",
+        "--forms",
+        "-f",
         nargs="+",
         help="Exact word form(s) to search for (fast)",
     )
     search_group.add_argument(
-        "--pattern", "-p",
+        "--pattern",
+        "-p",
         help="Regex pattern to search for (fast)",
     )
 
@@ -77,7 +80,8 @@ Examples:
         help="Corpus reader to use (default: tesserae)",
     )
     parser.add_argument(
-        "--root", "-r",
+        "--root",
+        "-r",
         type=Path,
         default=None,
         help="Root directory of corpus (default: auto-detect or download)",
@@ -99,7 +103,8 @@ Examples:
 
     # Output parameters
     parser.add_argument(
-        "--output", "-o",
+        "--output",
+        "-o",
         type=Path,
         help="Output file path (default: auto-generated in cli_output/)",
     )
@@ -115,7 +120,8 @@ Examples:
         help="Output format (default: tsv)",
     )
     parser.add_argument(
-        "--limit", "-n",
+        "--limit",
+        "-n",
         type=int,
         help="Maximum number of results",
     )
@@ -134,7 +140,8 @@ Examples:
 
     # Verbosity
     parser.add_argument(
-        "--quiet", "-q",
+        "--quiet",
+        "-q",
         action="store_true",
         help="Suppress progress messages",
     )
@@ -200,7 +207,9 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
 
-    reader = reader_classes[args.reader](args.root)
+    # Use TOKENIZE level for pattern/form searches (faster), FULL for lemma searches
+    annotation_level = AnnotationLevel.FULL if args.lemmas else AnnotationLevel.TOKENIZE
+    reader = reader_classes[args.reader](args.root, annotation_level=annotation_level)
 
     # Get fileids if filter specified
     fileids = None
@@ -221,6 +230,7 @@ def main(argv: list[str] | None = None) -> int:
             lemma=args.lemmas,
             fileids=fileids,
             context=args.context,
+            show_progress=not args.quiet,
         )
         search_type = "lemma"
         first_term = args.lemmas[0]
@@ -232,6 +242,7 @@ def main(argv: list[str] | None = None) -> int:
             fileids=fileids,
             ignore_case=not args.case_sensitive,
             context=args.context,
+            show_progress=not args.quiet,
         )
         search_type = "form"
         first_term = args.forms[0]
@@ -243,6 +254,7 @@ def main(argv: list[str] | None = None) -> int:
             fileids=fileids,
             ignore_case=not args.case_sensitive,
             context=args.context,
+            show_progress=not args.quiet,
         )
         search_type = "pattern"
         first_term = "pattern"
@@ -251,12 +263,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.limit is not None:
         results_iter = islice(results_iter, args.limit)
 
-    # Collect results with progress
-    results: list[dict] = []
-    pbar = tqdm(results_iter, desc="Searching", unit=" matches", disable=args.quiet)
-    for result in pbar:
-        results.append(result)
-    pbar.close()
+    # Collect results
+    results: list[dict] = list(results_iter)
 
     search_time = time.time() - start_time
 
