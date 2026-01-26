@@ -195,8 +195,12 @@ class TestLatinLibraryReader:
         doc = next(reader.docs())
         assert "title" in doc._.metadata
 
-    def test_missing_root_raises_error(self):
+    def test_missing_root_raises_error(self, tmp_path, monkeypatch):
         """Missing corpus without auto_download raises FileNotFoundError."""
+        # Mock default_root to return a non-existent path
+        nonexistent_path = tmp_path / "nonexistent_corpus"
+        monkeypatch.setattr(LatinLibraryReader, "default_root", classmethod(lambda cls: nonexistent_path))
+
         with pytest.raises(FileNotFoundError):
             LatinLibraryReader(root=None, auto_download=False)
 

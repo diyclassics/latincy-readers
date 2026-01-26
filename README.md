@@ -1,8 +1,12 @@
+<p align="center">
+  <img src="assets/latincy-readers-logo.jpg" alt="LatinCy Readers" width="400">
+</p>
+
 # LatinCy Readers
 
 Corpus readers for Latin texts with [LatinCy](https://github.com/diyclassics/latincy) integration.
 
-Version 1.0.0; Python 3.10+; LatinCy 3.8.0+
+Version 1.0.2; Python 3.10+; LatinCy 3.8.0+
 
 ## Installation
 

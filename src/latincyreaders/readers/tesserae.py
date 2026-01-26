@@ -409,6 +409,7 @@ class TesseraeReader(DownloadableCorpusMixin, BaseCorpusReader):
         matcher_pattern: list[dict],
         fileids: str | list[str] | None,
         context: bool,
+        show_progress: bool = False,
     ) -> Iterator[dict]:
         """Find sentences using spaCy Matcher patterns.
 
@@ -418,11 +419,13 @@ class TesseraeReader(DownloadableCorpusMixin, BaseCorpusReader):
             matcher_pattern: List of token patterns for spaCy Matcher.
             fileids: Files to search.
             context: Include surrounding sentences.
+            show_progress: If True, display progress bar.
 
         Yields:
             Result dicts with matched spans.
         """
         from spacy.matcher import Matcher
+        from tqdm import tqdm
 
         nlp = self.nlp
         if nlp is None:
@@ -432,7 +435,14 @@ class TesseraeReader(DownloadableCorpusMixin, BaseCorpusReader):
         matcher = Matcher(nlp.vocab)
         matcher.add("PATTERN", [matcher_pattern])
 
-        for doc in self.docs(fileids):
+        # Get fileids list for progress bar
+        if show_progress:
+            fids = self._resolve_fileids(fileids)
+            doc_iter = tqdm(self.docs(fids), total=len(fids), desc="Files", unit="file")
+        else:
+            doc_iter = self.docs(fileids)
+
+        for doc in doc_iter:
             sents = list(doc.sents)
             matches = matcher(doc)
 
