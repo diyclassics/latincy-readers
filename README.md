@@ -11,11 +11,11 @@ Version 1.1.0; Python 3.10+; LatinCy 3.8.0+
 ## Installation
 
 ```bash
-# Install from GitHub
-pip install git+https://github.com/diyclassics/latincy-readers.git
+# Install from PyPI
+pip install latincy-readers
 
-# With LatinCy model included
-pip install "latincy-readers[models] @ git+https://github.com/diyclassics/latincy-readers.git"
+# Install the LatinCy model separately
+pip install https://huggingface.co/latincy/la_core_web_lg/resolve/main/la_core_web_lg-3.8.0-py3-none-any.whl
 
 # For development (editable install)
 git clone https://github.com/diyclassics/latincy-readers.git
