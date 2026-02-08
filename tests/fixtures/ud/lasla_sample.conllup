@@ -1,0 +1,16 @@
+# sent_id = verg.aen.1.1
+# text = Arma virumque cano.
+1	Arma	arma	NOUN	N-	Case=Acc|Gender=Neut|Number=Plur	_	_	_	_
+2	virumque	vir	NOUN	N-	Case=Acc|Gender=Masc|Number=Sing	_	_	_	SpaceAfter=No
+3	cano	cano	VERB	V-	Mood=Ind|Number=Sing|Person=1|Tense=Pres|Voice=Act	_	_	_	SpaceAfter=No
+4	.	.	PUNCT	PUNCT	_	_	_	_	_
+
+# sent_id = verg.aen.1.2
+# text = Troiae qui primus ab oris.
+1	Troiae	Troia	PROPN	NE	Case=Gen|Gender=Fem|Number=Sing	_	_	_	_
+2	qui	qui	PRON	PRO	Case=Nom|Gender=Masc|Number=Sing	_	_	_	_
+3	primus	primus	ADJ	ADJ	Case=Nom|Degree=Pos|Gender=Masc|Number=Sing	_	_	_	_
+4	ab	ab	ADP	R-	_	_	_	_	_
+5	oris	ora	NOUN	N-	Case=Abl|Gender=Neut|Number=Plur	_	_	_	SpaceAfter=No
+6	.	.	PUNCT	PUNCT	_	_	_	_	_
+

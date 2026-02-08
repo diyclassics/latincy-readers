@@ -58,6 +58,7 @@ for text in reader.texts():
 | `PerseusReader` | `.xml` | No | Perseus Digital Library TEI |
 | `CamenaReader` | `.xml` | Yes | CAMENA Neo-Latin corpus |
 | `TxtdownReader` | `.txtd` | No | Txtdown format with citations |
+| `UDReader` | `.conllu`/`.conllup` | No | Universal Dependencies format (incl. LASLA) |
 
 ### Auto-Download
 

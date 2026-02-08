@@ -11,6 +11,7 @@ Readers:
     - PerseusReader: Perseus Digital Library
     - CamenaReader: CAMENA Neo-Latin corpus
     - TxtdownReader: TXT-down format (Tesserae derivative)
+    - UDReader: Universal Dependencies format (.conllu/.conllup)
 
 Core:
     - AnnotationLevel: Control NLP processing overhead
@@ -39,6 +40,7 @@ from latincyreaders.readers.plaintext import PlaintextReader, LatinLibraryReader
 from latincyreaders.readers.tei import TEIReader, PerseusReader
 from latincyreaders.readers.camena import CamenaReader
 from latincyreaders.readers.txtdown import TxtdownReader
+from latincyreaders.readers.ud import UDReader
 from latincyreaders.utils.metadata import MetadataManager
 
 __version__ = "1.0.0"
@@ -51,6 +53,7 @@ __all__ = [
     "PerseusReader",
     "CamenaReader",
     "TxtdownReader",
+    "UDReader",
     # Core
     "AnnotationLevel",
     "FileSelector",

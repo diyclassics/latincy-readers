@@ -44,3 +44,21 @@ def camena_dir(fixtures_dir) -> Path:
 def txtdown_dir(fixtures_dir) -> Path:
     """Path to txtdown test fixtures."""
     return fixtures_dir / "txtdown"
+
+
+@pytest.fixture
+def ud_dir(fixtures_dir) -> Path:
+    """Path to UD (CONLLU/CONLLUP) test fixtures."""
+    return fixtures_dir / "ud"
+
+
+@pytest.fixture
+def sample_conllu_file(ud_dir) -> Path:
+    """Path to sample .conllu file."""
+    return ud_dir / "sample.conllu"
+
+
+@pytest.fixture
+def sample_conllup_file(ud_dir) -> Path:
+    """Path to sample .conllup file (LASLA format)."""
+    return ud_dir / "lasla_sample.conllup"

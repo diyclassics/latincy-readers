@@ -1,0 +1,21 @@
+# sent_id = cic.amic.1
+# text = Q. Mucius augur multa narrare de C. Laelio.
+1	Q.	Quintus	PROPN	NE	Case=Nom|Gender=Masc|Number=Sing	2	nmod	_	_
+2	Mucius	Mucius	PROPN	NE	Case=Nom|Gender=Masc|Number=Sing	3	nsubj	_	_
+3	augur	augur	NOUN	N-	Case=Nom|Gender=Masc|Number=Sing	0	root	_	_
+4	multa	multus	ADJ	ADJ	Case=Acc|Gender=Neut|Number=Plur	5	obj	_	_
+5	narrare	narro	VERB	V-	Tense=Pres|VerbForm=Inf|Voice=Act	3	acl	_	_
+6	de	de	ADP	R-	_	8	case	_	_
+7	C.	Gaius	PROPN	NE	Case=Abl|Gender=Masc|Number=Sing	8	nmod	_	_
+8	Laelio	Laelius	PROPN	NE	Case=Abl|Gender=Masc|Number=Sing	5	obl	_	SpaceAfter=No
+9	.	.	PUNCT	PUNCT	_	3	punct	_	_
+
+# sent_id = cic.amic.2
+# text = Cum saepe multa tum memini.
+1	Cum	cum	SCONJ	C-	_	5	mark	_	_
+2	saepe	saepe	ADV	D-	_	5	advmod	_	_
+3	multa	multus	ADJ	ADJ	Case=Acc|Gender=Neut|Number=Plur	5	obj	_	_
+4	tum	tum	ADV	D-	_	5	advmod	_	_
+5	memini	memini	VERB	V-	Mood=Ind|Number=Sing|Person=1|Tense=Pres|Voice=Act	0	root	_	SpaceAfter=No
+6	.	.	PUNCT	PUNCT	_	5	punct	_	_
+
