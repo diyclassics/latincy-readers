@@ -67,6 +67,7 @@ class PlaintextReader(BaseCorpusReader):
         """Yield paragraphs from documents.
 
         Paragraphs are identified by blank line separation in the source text.
+        Uses spaCy's nlp.pipe() for efficient batch processing when returning Spans.
 
         Args:
             fileids: Files to process, or None for all.
@@ -75,27 +76,35 @@ class PlaintextReader(BaseCorpusReader):
         Yields:
             Paragraph Spans (or strings if as_text=True).
         """
-        for path in self._iter_paths(fileids):
-            text = path.read_text(encoding=self._encoding)
-            text = self._normalize_text(text)
-
-            # Split on blank lines
-            para_texts = [p.strip() for p in text.split("\n\n") if p.strip()]
-
-            if as_text:
+        if as_text:
+            for path in self._iter_paths(fileids):
+                text = path.read_text(encoding=self._encoding)
+                text = self._normalize_text(text)
+                para_texts = [p.strip() for p in text.split("\n\n") if p.strip()]
                 yield from para_texts
-            else:
-                # Need NLP for spans
-                nlp = self.nlp
-                if nlp is None:
-                    raise ValueError(
-                        "Cannot create paragraph Spans with annotation_level=NONE. "
-                        "Use paras(as_text=True) or set a higher annotation level."
-                    )
-                for para_text in para_texts:
-                    doc = nlp(para_text)
-                    # Yield the whole doc as a span
-                    yield doc[:]
+        else:
+            nlp = self.nlp
+            if nlp is None:
+                raise ValueError(
+                    "Cannot create paragraph Spans with annotation_level=NONE. "
+                    "Use paras(as_text=True) or set a higher annotation level."
+                )
+
+            # Collect all paragraph texts across files
+            all_para_texts: list[str] = []
+            for path in self._iter_paths(fileids):
+                text = path.read_text(encoding=self._encoding)
+                text = self._normalize_text(text)
+                para_texts = [p.strip() for p in text.split("\n\n") if p.strip()]
+                all_para_texts.extend(para_texts)
+
+            n_process = self._resolve_n_process(self._n_process)
+            for doc in nlp.pipe(
+                all_para_texts,
+                batch_size=self._batch_size,
+                n_process=n_process,
+            ):
+                yield doc[:]
 
 
 class LatinLibraryReader(DownloadableCorpusMixin, PlaintextReader):
@@ -137,6 +146,8 @@ class LatinLibraryReader(DownloadableCorpusMixin, PlaintextReader):
         auto_download: bool = True,
         cache: bool = True,
         cache_maxsize: int = 128,
+        n_process: int = 1,
+        batch_size: int = 256,
     ):
         """Initialize the Latin Library reader.
 
@@ -148,6 +159,9 @@ class LatinLibraryReader(DownloadableCorpusMixin, PlaintextReader):
             auto_download: If True and corpus not found, offer to download.
             cache: If True (default), cache processed Doc objects for reuse.
             cache_maxsize: Maximum number of documents to cache (default 128).
+            n_process: Number of processes for spaCy's nlp.pipe(). Use 1 (default)
+                for single-process, -1 for all CPU cores, or -2 for all cores minus one.
+            batch_size: Batch size for spaCy's nlp.pipe() (default 256).
         """
         if root is None:
             root = self._get_default_root(auto_download)
@@ -159,6 +173,8 @@ class LatinLibraryReader(DownloadableCorpusMixin, PlaintextReader):
             annotation_level=annotation_level,
             cache=cache,
             cache_maxsize=cache_maxsize,
+            n_process=n_process,
+            batch_size=batch_size,
         )
 
     def _parse_file(self, path: Path) -> Iterator[tuple[str, dict]]:

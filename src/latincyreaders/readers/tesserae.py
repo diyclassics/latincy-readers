@@ -77,6 +77,8 @@ class TesseraeReader(DownloadableCorpusMixin, BaseCorpusReader):
         cache_maxsize: int = 128,
         model_name: str = "la_core_web_lg",
         lang: str = "la",
+        n_process: int = 1,
+        batch_size: int = 256,
     ):
         """Initialize the Tesserae reader.
 
@@ -90,6 +92,9 @@ class TesseraeReader(DownloadableCorpusMixin, BaseCorpusReader):
             cache_maxsize: Maximum number of documents to cache (default 128).
             model_name: Name of the spaCy model to load for BASIC/FULL levels.
             lang: Language code for blank model in TOKENIZE level.
+            n_process: Number of processes for spaCy's nlp.pipe(). Use 1 (default)
+                for single-process, -1 for all CPU cores, or -2 for all cores minus one.
+            batch_size: Batch size for spaCy's nlp.pipe() (default 256).
         """
         if root is None:
             root = self._get_default_root(auto_download)
@@ -97,6 +102,7 @@ class TesseraeReader(DownloadableCorpusMixin, BaseCorpusReader):
             root, fileids, encoding, annotation_level,
             cache=cache, cache_maxsize=cache_maxsize,
             model_name=model_name, lang=lang,
+            n_process=n_process, batch_size=batch_size,
         )
 
     @classmethod
@@ -186,6 +192,7 @@ class TesseraeReader(DownloadableCorpusMixin, BaseCorpusReader):
 
         Each Doc has a "lines" span group containing citation-annotated spans.
         Metadata from JSON files is merged with file-level metadata.
+        Uses spaCy's nlp.pipe() for efficient batch processing of multiple texts.
 
         When caching is enabled (default), documents are stored after first access
         and returned from cache on subsequent requests for the same fileid.
@@ -203,39 +210,66 @@ class TesseraeReader(DownloadableCorpusMixin, BaseCorpusReader):
                 "Use texts() for raw strings."
             )
 
+        # Collect uncached texts and context for batch processing
+        pending: list[tuple[str, dict]] = []
+        yield_order: list[tuple[bool, "Doc | None"]] = []
+
         for path in self._iter_paths(fileids):
             fileid = str(path.relative_to(self._root))
 
             # Check cache first
             if self._cache_enabled and fileid in self._cache:
                 self._cache_hits += 1
-                # Move to end for LRU ordering
                 self._cache.move_to_end(fileid)
-                yield self._cache[fileid]
+                yield_order.append((True, self._cache[fileid]))
                 continue
 
-            # Cache miss - process the file
+            # Cache miss
             if self._cache_enabled:
                 self._cache_misses += 1
 
-            # Get JSON metadata
             json_metadata = self.get_metadata(fileid)
 
             for text, file_metadata in self._parse_file(path):
                 text = self._normalize_text(text)
-                doc = nlp(text)
-                doc._.fileid = fileid
-                # Merge: JSON metadata as base, file metadata overrides (excluding private keys)
                 clean_file_meta = {k: v for k, v in file_metadata.items() if not k.startswith("_")}
-                doc._.metadata = {**json_metadata, **clean_file_meta}
+                context = {
+                    "fileid": fileid,
+                    "metadata": {**json_metadata, **clean_file_meta},
+                    "_lines": file_metadata.get("_lines", []),
+                }
+                pending.append((text, context))
+                yield_order.append((False, None))
+
+        # Process all pending texts through nlp.pipe()
+        if pending:
+            n_process = self._resolve_n_process(self._n_process)
+            texts_iter = (text for text, _ctx in pending)
+            pipe_docs = nlp.pipe(
+                texts_iter,
+                batch_size=self._batch_size,
+                n_process=n_process,
+            )
+            pending_iter = iter(pending)
+        else:
+            pipe_docs = iter([])
+            pending_iter = iter([])
+
+        # Yield in original order
+        for is_cached, cached_doc in yield_order:
+            if is_cached:
+                yield cached_doc
+            else:
+                doc = next(pipe_docs)
+                _text, context = next(pending_iter)
+                fileid = context["fileid"]
+                doc._.fileid = fileid
+                doc._.metadata = context["metadata"]
 
                 # Create citation spans
-                lines_data = file_metadata.get("_lines", [])
-                doc.spans["lines"] = self._make_line_spans(doc, lines_data)
+                doc.spans["lines"] = self._make_line_spans(doc, context["_lines"])
 
-                # Store in cache if enabled
                 if self._cache_enabled:
-                    # Evict oldest if at capacity
                     while len(self._cache) >= self._cache_maxsize:
                         self._cache.popitem(last=False)
                     self._cache[fileid] = doc

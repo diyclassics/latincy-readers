@@ -54,6 +54,8 @@ class TxtdownReader(BaseCorpusReader):
         annotation_level: AnnotationLevel = AnnotationLevel.FULL,
         cache: bool = True,
         cache_maxsize: int = 128,
+        n_process: int = 1,
+        batch_size: int = 256,
     ):
         """Initialize the txtdown reader.
 
@@ -64,6 +66,9 @@ class TxtdownReader(BaseCorpusReader):
             annotation_level: NLP annotation level.
             cache: If True (default), cache processed Doc objects for reuse.
             cache_maxsize: Maximum number of documents to cache (default 128).
+            n_process: Number of processes for spaCy's nlp.pipe(). Use 1 (default)
+                for single-process, -1 for all CPU cores, or -2 for all cores minus one.
+            batch_size: Batch size for spaCy's nlp.pipe() (default 256).
 
         Raises:
             ImportError: If txtdown package is not installed.
@@ -74,7 +79,8 @@ class TxtdownReader(BaseCorpusReader):
             )
         super().__init__(
             root, fileids, encoding, annotation_level,
-            cache=cache, cache_maxsize=cache_maxsize
+            cache=cache, cache_maxsize=cache_maxsize,
+            n_process=n_process, batch_size=batch_size,
         )
 
     @classmethod
@@ -198,6 +204,8 @@ class TxtdownReader(BaseCorpusReader):
         - doc.spans["sections"]: Section spans with citation info
         - doc.spans["lines"]: Line spans with citation info
 
+        Uses spaCy's nlp.pipe() for efficient batch processing of multiple texts.
+
         Args:
             fileids: Files to process, or None for all.
             annotation_level: Override default annotation level.
@@ -214,18 +222,31 @@ class TxtdownReader(BaseCorpusReader):
                 "Use texts() for raw strings."
             )
 
+        # Collect texts and context for batch processing
+        pending: list[tuple[str, dict]] = []
+
         for path in self._iter_paths(fileids):
             fileid = str(path.relative_to(self._root))
 
             for text, metadata in self._parse_file(path):
                 text = self._normalize_text(text)
-                doc = nlp(text)
-                doc._.fileid = fileid
-                doc._.metadata = metadata
+                context = {"fileid": fileid, "metadata": metadata}
+                pending.append((text, context))
 
-                # Add citation spans
-                self._add_citation_spans(doc, metadata)
+        # Process all texts through nlp.pipe()
+        if pending:
+            n_process = self._resolve_n_process(self._n_process)
+            texts_iter = (text for text, _ctx in pending)
+            pipe_docs = nlp.pipe(
+                texts_iter,
+                batch_size=self._batch_size,
+                n_process=n_process,
+            )
 
+            for doc, (_text, context) in zip(pipe_docs, pending):
+                doc._.fileid = context["fileid"]
+                doc._.metadata = context["metadata"]
+                self._add_citation_spans(doc, context["metadata"])
                 yield doc
 
     def _add_citation_spans(self, doc: "Doc", metadata: dict) -> None:

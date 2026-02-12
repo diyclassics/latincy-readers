@@ -48,6 +48,8 @@ class TEIReader(BaseCorpusReader):
         remove_notes: bool = True,
         cache: bool = True,
         cache_maxsize: int = 128,
+        n_process: int = 1,
+        batch_size: int = 256,
     ):
         """Initialize the TEI reader.
 
@@ -60,6 +62,9 @@ class TEIReader(BaseCorpusReader):
             remove_notes: Whether to remove <note> elements from text.
             cache: If True (default), cache processed Doc objects for reuse.
             cache_maxsize: Maximum number of documents to cache (default 128).
+            n_process: Number of processes for spaCy's nlp.pipe(). Use 1 (default)
+                for single-process, -1 for all CPU cores, or -2 for all cores minus one.
+            batch_size: Batch size for spaCy's nlp.pipe() (default 256).
         """
         super().__init__(
             root=root,
@@ -68,6 +73,8 @@ class TEIReader(BaseCorpusReader):
             annotation_level=annotation_level,
             cache=cache,
             cache_maxsize=cache_maxsize,
+            n_process=n_process,
+            batch_size=batch_size,
         )
         self._namespaces = namespaces
         self._remove_notes = remove_notes
@@ -253,6 +260,8 @@ class TEIReader(BaseCorpusReader):
     ) -> Iterator["Span | str"]:
         """Yield paragraphs from TEI documents.
 
+        Uses spaCy's nlp.pipe() for efficient batch processing when returning Spans.
+
         Args:
             fileids: Files to process, or None for all.
             as_text: If True, yield strings instead of Span objects.
@@ -260,30 +269,43 @@ class TEIReader(BaseCorpusReader):
         Yields:
             Paragraph Spans (or strings if as_text=True).
         """
-        for path in self._iter_paths(fileids):
-            root = self._parse_xml(path)
-            if root is None:
-                continue
-
-            body = self._get_body(root)
-            if body is None:
-                continue
-
-            para_texts = self._extract_paragraphs(body)
-
-            if as_text:
-                for para_text in para_texts:
+        if as_text:
+            for path in self._iter_paths(fileids):
+                root = self._parse_xml(path)
+                if root is None:
+                    continue
+                body = self._get_body(root)
+                if body is None:
+                    continue
+                for para_text in self._extract_paragraphs(body):
                     yield self._normalize_text(para_text)
-            else:
-                nlp = self.nlp
-                if nlp is None:
-                    raise ValueError(
-                        "Cannot create paragraph Spans with annotation_level=NONE. "
-                        "Use paras(as_text=True) or set a higher annotation level."
-                    )
-                for para_text in para_texts:
-                    doc = nlp(self._normalize_text(para_text))
-                    yield doc[:]
+        else:
+            nlp = self.nlp
+            if nlp is None:
+                raise ValueError(
+                    "Cannot create paragraph Spans with annotation_level=NONE. "
+                    "Use paras(as_text=True) or set a higher annotation level."
+                )
+
+            # Collect all paragraph texts across files
+            all_para_texts: list[str] = []
+            for path in self._iter_paths(fileids):
+                root = self._parse_xml(path)
+                if root is None:
+                    continue
+                body = self._get_body(root)
+                if body is None:
+                    continue
+                for para_text in self._extract_paragraphs(body):
+                    all_para_texts.append(self._normalize_text(para_text))
+
+            n_process = self._resolve_n_process(self._n_process)
+            for doc in nlp.pipe(
+                all_para_texts,
+                batch_size=self._batch_size,
+                n_process=n_process,
+            ):
+                yield doc[:]
 
 
 class PerseusReader(TEIReader):
@@ -306,6 +328,8 @@ class PerseusReader(TEIReader):
         remove_notes: bool = True,
         cache: bool = True,
         cache_maxsize: int = 128,
+        n_process: int = 1,
+        batch_size: int = 256,
     ):
         """Initialize the Perseus reader.
 
@@ -317,6 +341,9 @@ class PerseusReader(TEIReader):
             remove_notes: Whether to remove <note> elements.
             cache: If True (default), cache processed Doc objects for reuse.
             cache_maxsize: Maximum number of documents to cache (default 128).
+            n_process: Number of processes for spaCy's nlp.pipe(). Use 1 (default)
+                for single-process, -1 for all CPU cores, or -2 for all cores minus one.
+            batch_size: Batch size for spaCy's nlp.pipe() (default 256).
         """
         super().__init__(
             root=root,
@@ -327,6 +354,8 @@ class PerseusReader(TEIReader):
             remove_notes=remove_notes,
             cache=cache,
             cache_maxsize=cache_maxsize,
+            n_process=n_process,
+            batch_size=batch_size,
         )
 
     def headers(self, fileids: str | list[str] | None = None) -> Iterator[dict]:

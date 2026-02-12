@@ -72,6 +72,8 @@ class CamenaCorpusReader(DownloadableCorpusMixin, TEIReader):
         auto_download: bool = True,
         cache: bool = True,
         cache_maxsize: int = 128,
+        n_process: int = 1,
+        batch_size: int = 256,
     ):
         """Initialize the CAMENA reader.
 
@@ -85,6 +87,9 @@ class CamenaCorpusReader(DownloadableCorpusMixin, TEIReader):
             auto_download: If True and corpus not found, prompt to download.
             cache: If True (default), cache processed Doc objects for reuse.
             cache_maxsize: Maximum number of documents to cache (default 128).
+            n_process: Number of processes for spaCy's nlp.pipe(). Use 1 (default)
+                for single-process, -1 for all CPU cores, or -2 for all cores minus one.
+            batch_size: Batch size for spaCy's nlp.pipe() (default 256).
         """
         if root is None:
             root = self._get_default_root(auto_download)
@@ -99,6 +104,8 @@ class CamenaCorpusReader(DownloadableCorpusMixin, TEIReader):
             remove_notes=remove_notes,
             cache=cache,
             cache_maxsize=cache_maxsize,
+            n_process=n_process,
+            batch_size=batch_size,
         )
         self._include_front = include_front
 

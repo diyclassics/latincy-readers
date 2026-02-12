@@ -8,6 +8,7 @@ and the standard iteration interface.
 from __future__ import annotations
 
 import json
+import os
 import re
 import unicodedata
 from abc import ABC, abstractmethod
@@ -61,6 +62,8 @@ class BaseCorpusReader(ABC):
         cache_maxsize: int = 128,
         model_name: str = "la_core_web_lg",
         lang: str = "la",
+        n_process: int = 1,
+        batch_size: int = 256,
     ):
         """Initialize the corpus reader.
 
@@ -74,6 +77,9 @@ class BaseCorpusReader(ABC):
             cache_maxsize: Maximum number of documents to cache (default 128).
             model_name: Name of the spaCy model to load for BASIC/FULL levels.
             lang: Language code for blank model in TOKENIZE level.
+            n_process: Number of processes for spaCy's nlp.pipe(). Use 1 (default)
+                for single-process, -1 for all CPU cores, or -2 for all cores minus one.
+            batch_size: Batch size for spaCy's nlp.pipe() (default 256).
         """
         self._root = Path(root).resolve()
         self._fileids_pattern = fileids or self._default_file_pattern()
@@ -84,6 +90,8 @@ class BaseCorpusReader(ABC):
         self._nlp: Language | None = None  # Lazy loaded
         self._metadata_pattern = metadata_pattern
         self._metadata: dict[str, dict[str, Any]] | None = None  # Lazy loaded
+        self._n_process = n_process
+        self._batch_size = batch_size
 
         # Caching
         self._cache_enabled = cache
@@ -117,6 +125,27 @@ class BaseCorpusReader(ABC):
     def cache_enabled(self) -> bool:
         """Whether document caching is enabled."""
         return self._cache_enabled
+
+    @staticmethod
+    def _resolve_n_process(n_process: int) -> int:
+        """Resolve n_process to an actual core count.
+
+        Follows the sklearn/joblib convention:
+            1     -> single process (no parallelism)
+            N > 0 -> use N processes
+            -1    -> use all CPU cores
+            -2    -> use all CPU cores minus one
+
+        Args:
+            n_process: Requested process count.
+
+        Returns:
+            Resolved positive integer.
+        """
+        if n_process >= 1:
+            return n_process
+        cpu_count = os.cpu_count() or 1
+        return max(1, cpu_count + 1 + n_process)
 
     def cache_stats(self) -> dict[str, int]:
         """Return cache statistics.
@@ -331,6 +360,7 @@ class BaseCorpusReader(ABC):
 
         The level of annotation depends on the reader's annotation_level setting.
         Metadata from JSON files is merged with any metadata from _parse_file().
+        Uses spaCy's nlp.pipe() for efficient batch processing of multiple texts.
 
         When caching is enabled (default), documents are stored after first access
         and returned from cache on subsequent requests for the same fileid.
@@ -348,34 +378,62 @@ class BaseCorpusReader(ABC):
                 "Use texts() for raw strings, or set a higher annotation level."
             )
 
+        # Collect uncached texts and their context for batch processing.
+        # Each entry stores the text plus context needed to annotate
+        # the resulting Doc (fileid, merged metadata).
+        pending: list[tuple[str, dict]] = []
+        # Track yield order: True = cached (already yielded inline),
+        # False = pending (will be yielded from pipe results).
+        yield_order: list[tuple[bool, "Doc | None"]] = []
+
         for path in self._iter_paths(fileids):
             fileid = str(path.relative_to(self._root))
 
             # Check cache first
             if self._cache_enabled and fileid in self._cache:
                 self._cache_hits += 1
-                # Move to end for LRU ordering
                 self._cache.move_to_end(fileid)
-                yield self._cache[fileid]
+                yield_order.append((True, self._cache[fileid]))
                 continue
 
-            # Cache miss - process the file
+            # Cache miss
             if self._cache_enabled:
                 self._cache_misses += 1
 
-            # Get JSON metadata and merge with file-level metadata
             json_metadata = self.get_metadata(fileid)
 
             for text, file_metadata in self._parse_file(path):
                 text = self._normalize_text(text)
-                doc = nlp(text)
-                doc._.fileid = fileid
-                # Merge: JSON metadata as base, file metadata overrides
-                doc._.metadata = {**json_metadata, **file_metadata}
+                context = {"fileid": fileid, "metadata": {**json_metadata, **file_metadata}}
+                pending.append((text, context))
+                yield_order.append((False, None))
 
-                # Store in cache if enabled
+        # Process all pending texts through nlp.pipe()
+        if pending:
+            n_process = self._resolve_n_process(self._n_process)
+            texts_iter = (text for text, _ctx in pending)
+            pipe_docs = nlp.pipe(
+                texts_iter,
+                batch_size=self._batch_size,
+                n_process=n_process,
+            )
+            pending_iter = iter(pending)
+        else:
+            pipe_docs = iter([])
+            pending_iter = iter([])
+
+        # Yield in original order, interleaving cached and pipe results
+        for is_cached, cached_doc in yield_order:
+            if is_cached:
+                yield cached_doc
+            else:
+                doc = next(pipe_docs)
+                _text, context = next(pending_iter)
+                fileid = context["fileid"]
+                doc._.fileid = fileid
+                doc._.metadata = context["metadata"]
+
                 if self._cache_enabled:
-                    # Evict oldest if at capacity
                     while len(self._cache) >= self._cache_maxsize:
                         self._cache.popitem(last=False)
                     self._cache[fileid] = doc
